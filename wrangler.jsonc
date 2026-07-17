@@ -4,11 +4,25 @@
   "main": ".output/server/index.mjs",
   "compatibility_date": "2026-07-17",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "photograph.pitrick.dev",
+      "custom_domain": true,
+    },
+  ],
   // Preserve values configured in the dashboard when deploying this file.
   // Secrets such as NUXT_SESSION_PASSWORD, CFRAME_BOOTSTRAP_TOKEN, and
   // CFRAME_STREAM_WEBHOOK_SECRET still belong in Wrangler secrets. `keep_vars`
   // preserves dashboard values but does not declare or upload those secrets.
   "keep_vars": true,
+  "vars": {
+    "NUXT_PUBLIC_APP_TITLE": "PiTrick's Photograph",
+    "NUXT_PUBLIC_APP_SLOGAN": "Memories rest within the lens.",
+    "NUXT_PUBLIC_APP_AUTHOR": "PiTrick",
+    "NUXT_PUBLIC_APP_AVATAR_URL": "https://cdn.pitrick.dev/logo.png",
+  },
   "assets": {
     "binding": "ASSETS",
     "directory": ".output/public",
