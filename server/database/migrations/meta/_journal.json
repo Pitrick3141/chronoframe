@@ -78,6 +78,34 @@
       "when": 1775699286491,
       "tag": "0010_bent_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1784250000000,
+      "tag": "0011_cloudflare_images",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1784251000000,
+      "tag": "0012_cloudflare_stream",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1784252000000,
+      "tag": "0013_cloudflare_r2_objects",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1784253000000,
+      "tag": "0014_private_image_upload_intents",
+      "breakpoints": true
     }
   ]
 }

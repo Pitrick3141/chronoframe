@@ -57,7 +57,7 @@ const mapStyle = computed(() => {
           },
         },
         glyphs: `https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=${mapConfig.value['maplibre.token']}`,
-      } as StyleSpecification)
+      } as unknown as StyleSpecification)
     )
   }
 })

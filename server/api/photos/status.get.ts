@@ -1,7 +1,9 @@
 import { photos } from '~~/server/database/schema'
 
+import { photosForClient } from '../../utils/photo-response'
+
 export default eventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
   const method = getMethod(event)
 
@@ -15,7 +17,7 @@ export default eventHandler(async (event) => {
       .all()
 
     return {
-      recentPhotos,
+      recentPhotos: photosForClient(recentPhotos, { includeSource: true }),
       timestamp: new Date().toISOString(),
     }
   } else {

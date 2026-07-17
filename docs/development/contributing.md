@@ -6,10 +6,10 @@ This document will guide you through setting up the ChronoFrame development envi
 
 ### Required Software
 
-- **Node.js**: 20.0+
-- **pnpm**: 9.0+ (preferred package manager)
+- **Node.js**: 22.12+
+- **pnpm**: 10.0+ (preferred package manager)
 - **Git**: Latest version
-- **Docker**: Optional, for containerized development
+- **Cloudflare account**: Optional for local mocks; required for remote integration testing
 
 ## Clone and Install
 
@@ -42,8 +42,14 @@ pnpm install
 ### 3. Configure Environment Variables
 
 ```bash
-# Copy environment variable template
+# Copy public configuration as needed
 cp .env.example .env
+
+# Keep local runtime secrets out of Git. Start from `.dev.vars.example` and
+# provide independent 32+ character values for NUXT_SESSION_PASSWORD and
+# CFRAME_BOOTSTRAP_TOKEN. Copy Cloudflare's Stream webhook secret when testing
+# signed callbacks locally.
+cp .dev.vars.example .dev.vars
 
 # Edit environment variables
 nano .env  # Or use your preferred editor
@@ -52,23 +58,10 @@ nano .env  # Or use your preferred editor
 #### Minimal Development Configuration
 
 ```bash
-# === Admin Account ===
-CFRAME_ADMIN_EMAIL=dev@example.com
-CFRAME_ADMIN_NAME=Developer
-CFRAME_ADMIN_PASSWORD=dev123456
-
 # === Authentication Settings ===
 NUXT_OAUTH_GITHUB_CLIENT_ID=your-dev-github-client-id
 NUXT_OAUTH_GITHUB_CLIENT_SECRET=your-dev-github-client-secret
-NUXT_SESSION_PASSWORD=your-32-character-development-key
-
-# === Storage Settings (can use MinIO for development) ===
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=http://localhost:9000
-NUXT_PROVIDER_S3_BUCKET=chronoframe-dev
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=minioadmin
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=minioadmin
+# NUXT_SESSION_PASSWORD, CFRAME_BOOTSTRAP_TOKEN, and CFRAME_STREAM_WEBHOOK_SECRET belong in .dev.vars, not this public file.
 
 # === Map Services (optional) ===
 NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-development-token
@@ -136,33 +129,32 @@ chronoframe/
 
 #### Backend Technologies
 
-- **Nitro**: Server-side framework
-- **SQLite**: Lightweight database
+- **Cloudflare Workers / Nitro**: Edge server runtime
+- **D1**: SQLite-compatible serverless database
 - **Drizzle ORM**: Type-safe ORM
-- **Sharp**: High-performance image processing
-- **ExifTool**: EXIF data extraction
+- **Cloudflare Images**: Hosted image storage and transformations
+- **Cloudflare Stream**: Direct video upload, processing, and HLS delivery
+- **R2**: Other non-image, non-video object storage
 
 ## Development Workflow
 
 ### Start Development Server
 
 ```bash
-# Start complete development server
-pnpm dev
-
-# Or start step by step
-pnpm build:deps           # Build WebGL package
-pnpm dlx nuxi@latest dev  # Start Nuxt development server only
+# Generate bindings, initialize local D1, and start Wrangler
+pnpm cf:typegen
+pnpm d1:migrate:local
+pnpm dev:worker
 ```
 
 ### Database Operations
 
 ```bash
 # Generate migration files
-pnpm db:generate
+pnpm d1:generate
 
-# Execute database migrations
-pnpm db:migrate
+# Execute local database migrations
+pnpm d1:migrate:local
 ```
 
 ### Build Project
@@ -171,38 +163,25 @@ pnpm db:migrate
 # Build WebGL dependency package
 pnpm build:deps
 
-# Build complete project
-pnpm build
+# Build complete Worker project
+pnpm build:worker
 
-# Preview production build
-pnpm preview
+# Preview in Wrangler's local runtime
+pnpm dev:worker
 ```
 
 ## Testing Environment
 
-### Local MinIO Storage
+### Local Cloudflare Bindings
 
-Run local MinIO service using Docker:
-
-```bash
-# Start MinIO
-docker run -d \
-  --name minio \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  -e "MINIO_ROOT_USER=minioadmin" \
-  -e "MINIO_ROOT_PASSWORD=minioadmin" \
-  minio/minio server /data --console-address ":9001"
-```
-
-Access MinIO console: http://localhost:9001
+`wrangler dev` supplies local D1, R2, and Hosted Images binding implementations. Local data is isolated from production. Apply migrations with `pnpm d1:migrate:local` before starting the app. Validate Stream Direct Creator Upload and HLS playback against a deployed, account-backed preview; no Stream API token belongs in `.dev.vars`.
 
 ### GitHub OAuth App
 
 1. Visit GitHub Settings > Developer settings > OAuth Apps
 2. Create new OAuth app
 3. Set callback URL: `http://localhost:3000/api/auth/github`
-4. Copy Client ID and Client Secret to `.env` file
+4. Put the Client ID in local configuration and the Client Secret in `.dev.vars`
 
 ### Mapbox Development Tokens
 

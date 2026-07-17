@@ -25,10 +25,9 @@ defineOgImageComponent('Photo', {
   description: currentPhoto.value
     ? currentPhoto.value.description
     : getSetting('app:title'),
-  thumbnailJpegUrl:
-    currentPhoto.value && currentPhoto.value.thumbnailKey
-      ? `/thumb/${encodeURIComponent(currentPhoto.value.thumbnailUrl || '')}`
-      : undefined,
+  thumbnailJpegUrl: currentPhoto.value?.thumbnailUrl
+    ? `/thumb/${encodeURIComponent(currentPhoto.value.thumbnailUrl || '')}`
+    : undefined,
   photo: currentPhoto.value || undefined,
 })
 

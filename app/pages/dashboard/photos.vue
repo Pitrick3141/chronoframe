@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
+import type { DropdownMenuItem, FormSubmitEvent, TableColumn } from '@nuxt/ui'
 import type { Photo, PipelineQueueItem } from '~~/server/utils/db'
+import type { UploadTransportOptions } from '~/composables/useUpload'
 import { h, resolveComponent } from 'vue'
 import { Icon, UBadge } from '#components'
 import ThumbImage from '~/components/ui/ThumbImage.vue'
@@ -33,10 +34,42 @@ useHead({
   title: () => $t('title.photos'),
 })
 
-const maxFileSizeMB = computed(() => {
-  const val = getSetting('system:upload.maxFileSize')
-  return typeof val === 'number' ? val : 256
-})
+const MEBIBYTE = 1024 * 1024
+const DEFAULT_HOSTED_IMAGES_MAX_UPLOAD_BYTES = 10 * MEBIBYTE
+const MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES = 25 * MEBIBYTE
+const DEFAULT_STREAM_MAX_UPLOAD_BYTES = 200_000_000 - 1
+
+type CloudflareUploadLimits = {
+  images?: { maxUploadBytes?: number | string }
+  stream?: { maxUploadBytes?: number | string }
+  r2?: { maxObjectBytes?: number | string }
+}
+
+const cloudflareUploadLimits = (
+  useRuntimeConfig().public as unknown as {
+    cloudflare?: CloudflareUploadLimits
+  }
+).cloudflare
+
+const readPositiveByteLimit = (
+  value: number | string | undefined,
+  fallback: number,
+) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+const hostedImagesMaxUploadBytes = readPositiveByteLimit(
+  cloudflareUploadLimits?.images?.maxUploadBytes,
+  DEFAULT_HOSTED_IMAGES_MAX_UPLOAD_BYTES,
+)
+const streamMaxUploadBytes = readPositiveByteLimit(
+  cloudflareUploadLimits?.stream?.maxUploadBytes,
+  DEFAULT_STREAM_MAX_UPLOAD_BYTES,
+)
+const bytesToMiB = (bytes: number) => Number((bytes / MEBIBYTE).toFixed(2))
+const imageSourceMaxUploadMiB = bytesToMiB(MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES)
+const streamMaxUploadMiB = bytesToMiB(streamMaxUploadBytes)
 
 const systemUploadEraseLocationDefault = computed(() => {
   const val = getSetting('privacy:upload.autoEraseLocation')
@@ -45,7 +78,7 @@ const systemUploadEraseLocationDefault = computed(() => {
 
 const dayjs = useDayjs()
 
-const { status, refresh } = usePhotos()
+const { photos, status, refresh } = usePhotos()
 const { filteredPhotos, selectedCounts, hasActiveFilters } = usePhotoFilters()
 
 const totalSelectedFilters = computed(() => {
@@ -103,6 +136,53 @@ const fetchReactions = async (photoIds: string[]) => {
   }
 }
 
+type UploadIntentResponse = {
+  signedUrl?: string
+  fileKey: string | null
+  intentId?: string
+  expiresIn?: number
+  skipped?: boolean
+  title?: string
+  message?: string
+  uploadKind?: 'image' | 'stream-video'
+  uploadMethod?: 'PUT' | 'POST'
+  uploadEncoding?: 'raw' | 'multipart'
+  taskId?: number
+  existingPhoto?: { id: string }
+  warningInfo?: {
+    warning?: string
+    message?: string
+  }
+}
+
+type ImageUploadCompleteResponse = {
+  ok: true
+  key: string
+  imageId: string
+  intentId: string
+  embeddedStreamId?: string
+  kind: 'image'
+  status: 'uploaded' | 'finalized'
+  reused: boolean
+  taskId?: number
+  taskStatus?: QueueTaskStatus
+  photoId?: string
+  warning?: string
+  error?: string
+}
+
+type QueueTaskStatus = 'in-stages' | 'completed' | 'failed'
+
+type QueueAddTaskResponse = {
+  success: boolean
+  processingSuccess: boolean
+  taskId: number
+  status: QueueTaskStatus
+  photoId?: string
+  warning?: string
+  error?: string
+}
+
 interface UploadingFile {
   file: File
   fileName: string
@@ -121,7 +201,7 @@ interface UploadingFile {
   error?: string
   warning?: string
   taskId?: number
-  signedUrlResponse?: { signedUrl: string; fileKey: string; expiresIn: number }
+  signedUrlResponse?: UploadIntentResponse
   uploadProgress?: {
     loaded: number
     total: number
@@ -136,6 +216,23 @@ interface UploadingFile {
 }
 
 const uploadingFiles = ref<Map<string, UploadingFile>>(new Map())
+const abandonedStreamTaskIds = new Set<number>()
+
+const markStreamUploadFailed = (taskId?: number) => {
+  if (!taskId || abandonedStreamTaskIds.has(taskId)) return
+
+  abandonedStreamTaskIds.add(taskId)
+  void $fetch(`/api/photos/stream-upload/${taskId}`, {
+    method: 'DELETE',
+    keepalive: true,
+  }).catch((error) => {
+    abandonedStreamTaskIds.delete(taskId)
+    console.warn(
+      `Failed to mark Stream upload task ${taskId} as failed:`,
+      error,
+    )
+  })
+}
 
 interface EditFormState {
   title: string
@@ -266,7 +363,8 @@ const uploadImage = async (
   file: File,
   existingFileId?: string,
   eraseLocationOnUpload?: boolean,
-) => {
+  pairedPhotoId?: string,
+): Promise<string | undefined> => {
   const fileName = file.name
   const fileId = existingFileId || `${Date.now()}-${fileName}`
 
@@ -298,13 +396,30 @@ const uploadImage = async (
   try {
     // 第一步：获取预签名 URL
     uploadingFile.status = 'preparing'
-    const signedUrlResponse = await $fetch('/api/photos', {
-      method: 'POST',
-      body: {
-        fileName: file.name,
-        contentType: file.type,
+    if (isVideoUploadFile(file) && !pairedPhotoId) {
+      throw new Error(
+        `Cloudflare Stream video ${file.name} has no uniquely matched photo`,
+      )
+    }
+    const signedUrlResponse = await $fetch<UploadIntentResponse>(
+      '/api/photos',
+      {
+        method: 'POST',
+        body: {
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
+          ...(pairedPhotoId
+            ? { photoId: pairedPhotoId }
+            : {
+                lastModified: new Date(file.lastModified).toISOString(),
+                eraseLocation:
+                  eraseLocationOnUpload ??
+                  systemUploadEraseLocationDefault.value,
+              }),
+        },
       },
-    })
+    )
 
     uploadingFile.signedUrlResponse = signedUrlResponse
 
@@ -326,7 +441,7 @@ const uploadImage = async (
       })
 
       uploadingFiles.value = new Map(uploadingFiles.value)
-      return
+      return signedUrlResponse.existingPhoto?.id
     }
 
     if (signedUrlResponse.warningInfo) {
@@ -338,104 +453,203 @@ const uploadImage = async (
       uploadingFiles.value = new Map(uploadingFiles.value)
     }
 
+    const signedUrl = signedUrlResponse.signedUrl
+    const uploadFileKey = signedUrlResponse.fileKey
+    const isStreamUpload = signedUrlResponse.uploadKind === 'stream-video'
+    const streamTaskId = isStreamUpload ? signedUrlResponse.taskId : undefined
+    if (!signedUrl || (isStreamUpload && (!uploadFileKey || !streamTaskId))) {
+      if (isStreamUpload) markStreamUploadFailed(streamTaskId)
+      throw new Error($t('dashboard.photos.messages.uploadFailed'))
+    }
+    let finalizedPhotoId: string | undefined
+    const uploadTransport: UploadTransportOptions = {
+      method:
+        signedUrlResponse.uploadMethod ?? (isStreamUpload ? 'POST' : 'PUT'),
+      encoding:
+        signedUrlResponse.uploadEncoding ??
+        (isStreamUpload ? 'multipart' : 'raw'),
+      fileFieldName: 'file',
+      // Stream direct-upload URLs are single-use. A retry must start with a
+      // fresh upload intent, never replay the same multipart POST URL.
+      ...(isStreamUpload ? { maxRetries: 0 } : {}),
+    }
+
     uploadingFile.status = 'uploading'
     uploadingFile.canAbort = true
     uploadingFile.progress = 0
     uploadingFiles.value = new Map(uploadingFiles.value)
 
     // 第二步：使用 composable 上传文件到存储
-    await uploadManager.uploadFile(file, signedUrlResponse.signedUrl, {
-      onProgress: (progress: UploadProgress) => {
-        uploadingFile.progress = progress.percentage
-        uploadingFile.uploadProgress = {
-          loaded: progress.loaded,
-          total: progress.total,
-          percentage: progress.percentage,
-          speed: progress.speed,
-          timeRemaining: progress.timeRemaining,
-          speedText: progress.speed ? `${formatBytes(progress.speed)}/s` : '',
-          timeRemainingText: progress.timeRemaining
-            ? dayjs.duration(progress.timeRemaining, 'seconds').humanize()
-            : '',
-        }
-        uploadingFiles.value = new Map(uploadingFiles.value)
-      },
-      onStatusChange: (status: string) => {
-        uploadingFile.canAbort = status === 'uploading'
-        uploadingFiles.value = new Map(uploadingFiles.value)
-      },
-      onSuccess: async (_xhr: XMLHttpRequest) => {
-        // 第三步：上传完成，提交到队列任务
-        uploadingFile.status = 'processing'
-        uploadingFile.progress = 100
-        uploadingFile.canAbort = false
-        uploadingFile.stage = null // 重置 stage，准备显示任务状态
-        uploadingFiles.value = new Map(uploadingFiles.value)
+    await uploadManager.uploadFile(
+      file,
+      signedUrl,
+      {
+        onProgress: (progress: UploadProgress) => {
+          uploadingFile.progress = progress.percentage
+          uploadingFile.uploadProgress = {
+            loaded: progress.loaded,
+            total: progress.total,
+            percentage: progress.percentage,
+            speed: progress.speed,
+            timeRemaining: progress.timeRemaining,
+            speedText: progress.speed ? `${formatBytes(progress.speed)}/s` : '',
+            timeRemainingText: progress.timeRemaining
+              ? dayjs.duration(progress.timeRemaining, 'seconds').humanize()
+              : '',
+          }
+          uploadingFiles.value = new Map(uploadingFiles.value)
+        },
+        onStatusChange: (status: string) => {
+          uploadingFile.canAbort = status === 'uploading'
+          uploadingFiles.value = new Map(uploadingFiles.value)
+        },
+        onSuccess: async (xhr: XMLHttpRequest) => {
+          // 第三步：上传完成，提交到队列任务
+          uploadingFile.status = 'processing'
+          uploadingFile.progress = 100
+          uploadingFile.canAbort = false
+          uploadingFile.stage = null // 重置 stage，准备显示任务状态
+          uploadingFiles.value = new Map(uploadingFiles.value)
 
-        try {
-          // 检查是否为MOV视频文件（通过MIME类型或文件扩展名）
-          const isMovFile =
-            file.type === 'video/quicktime' ||
-            file.type === 'video/mp4' ||
-            file.name.toLowerCase().endsWith('.mov')
+          try {
+            let actualUploadKey = uploadFileKey
+            let imageUploadResponse: ImageUploadCompleteResponse | undefined
+            if (!isStreamUpload) {
+              try {
+                imageUploadResponse = xhr.responseText
+                  ? (JSON.parse(
+                      xhr.responseText,
+                    ) as ImageUploadCompleteResponse)
+                  : undefined
+              } catch {
+                imageUploadResponse = undefined
+              }
+              actualUploadKey = imageUploadResponse?.key ?? null
+            }
 
-          const resp = await $fetch('/api/queue/add-task', {
-            method: 'POST',
-            body: {
-              payload: {
-                type: isMovFile ? 'live-photo-video' : 'photo',
-                storageKey: signedUrlResponse.fileKey,
-                ...(isMovFile
-                  ? {}
-                  : {
-                      eraseLocation:
-                        eraseLocationOnUpload ??
-                        systemUploadEraseLocationDefault.value,
-                    }),
+            if (!actualUploadKey) {
+              throw new Error($t('dashboard.photos.messages.uploadFailed'))
+            }
+
+            // Both Stream intents and the private image PUT create a durable
+            // D1 task server-side. Reuse it so closing the page after the
+            // storage write cannot strand an unfinalized media object.
+            const durableTaskId = isStreamUpload
+              ? streamTaskId
+              : imageUploadResponse?.taskId
+            const durableTaskStatus = imageUploadResponse?.taskStatus
+            if (durableTaskId) {
+              uploadingFile.taskId = durableTaskId
+              uploadingFile.warning =
+                imageUploadResponse?.warning ?? uploadingFile.warning
+
+              if (durableTaskStatus === 'completed') {
+                uploadingFile.status = 'completed'
+                uploadingFile.stage = null
+                finalizedPhotoId =
+                  imageUploadResponse?.photoId ?? actualUploadKey
+                uploadingFiles.value = new Map(uploadingFiles.value)
+                await refresh()
+              } else if (durableTaskStatus === 'failed') {
+                uploadingFile.status = 'error'
+                uploadingFile.stage = null
+                uploadingFile.error =
+                  imageUploadResponse?.error ||
+                  $t('dashboard.photos.messages.taskSubmitFailed')
+                uploadingFiles.value = new Map(uploadingFiles.value)
+              } else {
+                startTaskStatusCheck(durableTaskId, fileId)
+              }
+              return
+            }
+
+            if (isStreamUpload) {
+              throw new Error('Stream upload intent did not return a task ID')
+            }
+
+            const resp = await $fetch<QueueAddTaskResponse>(
+              '/api/queue/add-task',
+              {
+                method: 'POST',
+                body: {
+                  payload: {
+                    type: 'photo',
+                    storageKey: actualUploadKey,
+                    eraseLocation:
+                      eraseLocationOnUpload ??
+                      systemUploadEraseLocationDefault.value,
+                  },
+                  priority: 1,
+                  maxAttempts: 3,
+                },
               },
-              priority: isMovFile ? 0 : 1, // Live Photo 视频优先级更低，确保图片优先处理
-              maxAttempts: 3,
-            },
-          })
-
-          if (resp.success) {
-            uploadingFile.taskId = resp.taskId
-            uploadingFile.status = 'processing'
-            uploadingFiles.value = new Map(uploadingFiles.value)
-
-            // 开始任务状态检查
-            startTaskStatusCheck(resp.taskId, fileId)
-          } else {
-            uploadingFile.status = 'error'
-            uploadingFile.error = $t(
-              'dashboard.photos.messages.taskSubmitFailed',
             )
+
+            if (resp.success) {
+              uploadingFile.taskId = resp.taskId
+              uploadingFile.warning = resp.warning ?? uploadingFile.warning
+              if (!isStreamUpload && resp.photoId) {
+                finalizedPhotoId = resp.photoId
+              }
+
+              if (resp.status === 'completed') {
+                uploadingFile.status = 'completed'
+                uploadingFile.stage = null
+                if (!isStreamUpload && !finalizedPhotoId) {
+                  finalizedPhotoId = actualUploadKey
+                }
+                uploadingFiles.value = new Map(uploadingFiles.value)
+                await refresh()
+              } else if (resp.status === 'in-stages') {
+                uploadingFile.status = 'processing'
+                uploadingFiles.value = new Map(uploadingFiles.value)
+                startTaskStatusCheck(resp.taskId, fileId)
+              } else {
+                uploadingFile.status = 'error'
+                uploadingFile.stage = null
+                uploadingFile.error =
+                  resp.error || $t('dashboard.photos.messages.taskSubmitFailed')
+                uploadingFiles.value = new Map(uploadingFiles.value)
+              }
+            } else {
+              uploadingFile.status = 'error'
+              uploadingFile.error = $t(
+                'dashboard.photos.messages.taskSubmitFailed',
+              )
+              uploadingFiles.value = new Map(uploadingFiles.value)
+            }
+          } catch (processError: any) {
+            uploadingFile.status = 'error'
+            uploadingFile.error = `${$t('dashboard.photos.messages.taskSubmitFailed')}: ${processError.message}`
+            uploadingFile.canAbort = false
             uploadingFiles.value = new Map(uploadingFiles.value)
           }
-        } catch (processError: any) {
-          uploadingFile.status = 'error'
-          uploadingFile.error = `${$t('dashboard.photos.messages.taskSubmitFailed')}: ${processError.message}`
+        },
+        onError: (error: string) => {
+          if (isStreamUpload) markStreamUploadFailed(streamTaskId)
+
+          const isConflict = /\b409\b|Conflict/i.test(error)
+
+          if (isConflict) {
+            uploadingFile.status = 'blocked'
+            uploadingFile.error = $t('upload.duplicate.block.message', {
+              fileName,
+            })
+          } else {
+            uploadingFile.status = 'error'
+            uploadingFile.error = error
+          }
+
           uploadingFile.canAbort = false
           uploadingFiles.value = new Map(uploadingFiles.value)
-        }
+        },
+        onAbort: () => {
+          if (isStreamUpload) markStreamUploadFailed(streamTaskId)
+        },
       },
-      onError: (error: string) => {
-        const isConflict = /\b409\b|Conflict/i.test(error)
-
-        if (isConflict) {
-          uploadingFile.status = 'blocked'
-          uploadingFile.error = $t('upload.duplicate.block.message', {
-            fileName,
-          })
-        } else {
-          uploadingFile.status = 'error'
-          uploadingFile.error = error
-        }
-
-        uploadingFile.canAbort = false
-        uploadingFiles.value = new Map(uploadingFiles.value)
-      },
-    })
+      uploadTransport,
+    )
+    return finalizedPhotoId
   } catch (error: any) {
     uploadingFile.status = 'error'
     uploadingFile.canAbort = false
@@ -488,6 +702,7 @@ const uploadImage = async (
 const toast = useToast()
 const selectedFiles = ref<File[]>([])
 const isUploadSlideoverOpen = ref(false)
+const isBatchUploading = ref(false)
 const uploadEraseLocationEnabled = ref(systemUploadEraseLocationDefault.value)
 
 const hasSelectedFiles = computed(() => selectedFiles.value.length > 0)
@@ -621,7 +836,11 @@ const statusIntervals = ref<Map<number, NodeJS.Timeout>>(new Map())
 
 // 启动任务状态检查
 const startTaskStatusCheck = (taskId: number, fileId: string) => {
+  let isCheckingTask = false
   const intervalId = setInterval(async () => {
+    if (isCheckingTask) return
+    isCheckingTask = true
+
     try {
       const response = await $fetch(`/api/queue/stats/${taskId}`)
       const uploadingFile = uploadingFiles.value.get(fileId)
@@ -686,6 +905,8 @@ const startTaskStatusCheck = (taskId: number, fileId: string) => {
         )
         uploadingFiles.value = new Map(uploadingFiles.value)
       }
+    } finally {
+      isCheckingTask = false
     }
   }, 1000) // 每秒检查一次
 
@@ -1061,6 +1282,46 @@ const columns = computed<TableColumn<Photo>[]>(() => [
   },
 ])
 
+const STREAM_VIDEO_EXTENSIONS = [
+  '.3g2',
+  '.3gp',
+  '.avi',
+  '.flv',
+  '.gxf',
+  '.lxf',
+  '.m4v',
+  '.mkv',
+  '.m2p',
+  '.m2ts',
+  '.mov',
+  '.mp4',
+  '.mpeg',
+  '.mpg',
+  '.mts',
+  '.mxf',
+  '.qt',
+  '.ts',
+  '.vob',
+  '.webm',
+]
+
+const isVideoUploadFile = (file: File) => {
+  const filename = file.name.toLowerCase()
+  return (
+    file.type.toLowerCase().startsWith('video/') ||
+    STREAM_VIDEO_EXTENSIONS.some((extension) => filename.endsWith(extension))
+  )
+}
+
+const uploadSourceBasename = (fileName: string): string => {
+  const normalized = fileName.replaceAll('\\', '/')
+  const leafName = normalized.slice(normalized.lastIndexOf('/') + 1)
+  const extensionIndex = leafName.lastIndexOf('.')
+  const basename =
+    extensionIndex > 0 ? leafName.slice(0, extensionIndex) : leafName
+  return basename.trim().toLowerCase()
+}
+
 // 文件验证函数
 const validateFile = (
   file: File,
@@ -1070,21 +1331,33 @@ const validateFile = (
   reason?: 'unsupported-format' | 'file-too-large'
 } => {
   // 检查文件类型
-  const allowedTypes = [
+  const allowedImageTypes = [
     'image/jpeg',
     'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
     'image/heic',
     'image/heif',
-    'video/quicktime', // MOV 文件
   ]
 
-  const isValidImageType = allowedTypes.includes(file.type)
-  const isValidImageExtension = ['.heic', '.heif'].some((ext) =>
-    file.name.toLowerCase().endsWith(ext),
-  )
-  const isValidVideoExtension = file.name.toLowerCase().endsWith('.mov')
+  const isValidImageType = allowedImageTypes.includes(file.type)
+  const isValidImageExtension = [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.webp',
+    '.svg',
+    '.heic',
+    '.heif',
+  ].some((ext) => file.name.toLowerCase().endsWith(ext))
+  const isValidVideo = isVideoUploadFile(file)
+  const isValidImage = isValidImageType || isValidImageExtension
+  const isJpegImage =
+    file.type.toLowerCase() === 'image/jpeg' || /\.jpe?g$/i.test(file.name)
 
-  if (!isValidImageType && !isValidImageExtension && !isValidVideoExtension) {
+  if (!isValidImage && !isValidVideo) {
     return {
       valid: false,
       reason: 'unsupported-format',
@@ -1094,14 +1367,21 @@ const validateFile = (
     }
   }
 
-  const maxSize = maxFileSizeMB.value * 1024 * 1024
+  // Images and videos use separate deployment-provided service limits.
+  // Non-image, non-video objects are stored in R2 by other upload flows.
+  const maxSize = isValidVideo
+    ? streamMaxUploadBytes
+    : isJpegImage
+      ? MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES
+      : hostedImagesMaxUploadBytes
+  const maxSizeMiB = bytesToMiB(maxSize)
   if (file.size > maxSize) {
     return {
       valid: false,
       reason: 'file-too-large',
       error: $t('dashboard.photos.errors.fileTooLarge', {
         size: (file.size / 1024 / 1024).toFixed(2),
-        maxSize: maxFileSizeMB.value,
+        maxSize: maxSizeMiB,
       }),
     }
   }
@@ -1110,144 +1390,247 @@ const validateFile = (
 }
 
 const handleUpload = async () => {
-  const fileList = selectedFiles.value
+  if (isBatchUploading.value) return
+
+  const fileList = [...selectedFiles.value]
 
   if (fileList.length === 0) {
     return
   }
 
-  const errors: string[] = []
-  let tooLargeCount = 0
-  let unsupportedCount = 0
+  isBatchUploading.value = true
+  try {
+    const errors: string[] = []
+    let tooLargeCount = 0
+    let unsupportedCount = 0
 
-  // 先验证所有文件
-  const validFiles: File[] = []
-  const fileIdMapping = new Map<File, string>()
+    // 先验证所有文件
+    const validFiles: File[] = []
+    const fileIdMapping = new Map<File, string>()
 
-  for (const file of fileList) {
-    const validation = validateFile(file)
-    if (!validation.valid) {
-      errors.push(`${file.name}: ${validation.error}`)
-      if (validation.reason === 'file-too-large') {
-        tooLargeCount += 1
-      } else if (validation.reason === 'unsupported-format') {
-        unsupportedCount += 1
+    for (const file of fileList) {
+      const validation = validateFile(file)
+      if (!validation.valid) {
+        errors.push(`${file.name}: ${validation.error}`)
+        if (validation.reason === 'file-too-large') {
+          tooLargeCount += 1
+        } else if (validation.reason === 'unsupported-format') {
+          unsupportedCount += 1
+        }
+      } else {
+        validFiles.push(file)
+        // 为每个有效文件生成唯一ID
+        const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.name}`
+        fileIdMapping.set(file, fileId)
       }
-    } else {
-      validFiles.push(file)
-      // 为每个有效文件生成唯一ID
-      const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.name}`
-      fileIdMapping.set(file, fileId)
-    }
-  }
-
-  if (validFiles.length === 0) {
-    if (tooLargeCount > 0 && unsupportedCount === 0) {
-      toast.add({
-        title: $t('upload.error.tooLarge.title'),
-        description: $t('dashboard.photos.errors.allFilesTooLarge', {
-          count: tooLargeCount,
-          maxSize: maxFileSizeMB.value,
-        }),
-        color: 'error',
-      })
-    } else {
-      toast.add({
-        title: $t('dashboard.photos.messages.error'),
-        description: $t('dashboard.photos.errors.allFilesValidationFailed'),
-        color: 'error',
-      })
     }
 
-    return
-  }
-
-  if (tooLargeCount > 0) {
-    toast.add({
-      title: $t('upload.error.tooLarge.title'),
-      description: $t('dashboard.photos.errors.filesTooLargeSkipped', {
-        count: tooLargeCount,
-        maxSize: maxFileSizeMB.value,
-      }),
-      color: 'warning',
-    })
-  } else if (unsupportedCount > 0) {
-    toast.add({
-      title: $t('dashboard.photos.errors.fileValidationFailed'),
-      description: $t('dashboard.photos.errors.filesUnsupportedSkipped', {
-        count: unsupportedCount,
-      }),
-      color: 'warning',
-    })
-  }
-
-  // 立即为所有有效文件创建队列条目，状态为 waiting
-  for (const file of validFiles) {
-    const fileId = fileIdMapping.get(file)!
-    const uploadingFile: UploadingFile = {
-      file,
-      fileName: file.name,
-      fileId,
-      status: 'waiting',
-      canAbort: false,
-    }
-    uploadingFiles.value.set(fileId, uploadingFile)
-  }
-
-  // 触发队列更新
-  uploadingFiles.value = new Map(uploadingFiles.value)
-
-  // 动态并发上传，始终保持 CONCURRENT_LIMIT 个文件在上传
-  const CONCURRENT_LIMIT = 3 // 限制同时上传的文件数量
-
-  // 创建文件队列
-  const fileQueue = [...validFiles]
-  const activeUploads = new Set<Promise<void>>()
-
-  // 启动上传任务的函数
-  const startUpload = async (file: File): Promise<void> => {
-    const fileId = fileIdMapping.get(file)!
-    try {
-      await uploadImage(file, fileId, uploadEraseLocationEnabled.value)
-    } catch (error: any) {
-      errors.push(`${file.name}: ${error.message || '上传失败'}`)
-      console.error('上传错误:', error)
-    }
-  }
-
-  // 处理队列的函数
-  const processQueue = async (): Promise<void> => {
-    while (fileQueue.length > 0 || activeUploads.size > 0) {
-      // 如果当前活跃上传数量小于限制，且队列中还有文件，则启动新的上传
-      while (activeUploads.size < CONCURRENT_LIMIT && fileQueue.length > 0) {
-        const file = fileQueue.shift()!
-        const uploadPromise = startUpload(file)
-
-        activeUploads.add(uploadPromise)
-
-        // 当上传完成时，从活跃集合中移除
-        uploadPromise.finally(() => {
-          activeUploads.delete(uploadPromise)
+    if (validFiles.length === 0) {
+      if (tooLargeCount > 0 && unsupportedCount === 0) {
+        toast.add({
+          title: $t('upload.error.tooLarge.title'),
+          description: $t('dashboard.photos.errors.allFilesTooLarge', {
+            count: tooLargeCount,
+            imageMaxSize: imageSourceMaxUploadMiB,
+            videoMaxSize: streamMaxUploadMiB,
+          }),
+          color: 'error',
+        })
+      } else {
+        toast.add({
+          title: $t('dashboard.photos.messages.error'),
+          description: $t('dashboard.photos.errors.allFilesValidationFailed'),
+          color: 'error',
         })
       }
 
-      // 如果有活跃的上传，等待至少一个完成
-      if (activeUploads.size > 0) {
-        await Promise.race(activeUploads)
+      return
+    }
+
+    if (tooLargeCount > 0) {
+      toast.add({
+        title: $t('upload.error.tooLarge.title'),
+        description: $t('dashboard.photos.errors.filesTooLargeSkipped', {
+          count: tooLargeCount,
+          imageMaxSize: imageSourceMaxUploadMiB,
+          videoMaxSize: streamMaxUploadMiB,
+        }),
+        color: 'warning',
+      })
+    } else if (unsupportedCount > 0) {
+      toast.add({
+        title: $t('dashboard.photos.errors.fileValidationFailed'),
+        description: $t('dashboard.photos.errors.filesUnsupportedSkipped', {
+          count: unsupportedCount,
+        }),
+        color: 'warning',
+      })
+    }
+
+    // 立即为所有有效文件创建队列条目，状态为 waiting
+    for (const file of validFiles) {
+      const fileId = fileIdMapping.get(file)!
+      const uploadingFile: UploadingFile = {
+        file,
+        fileName: file.name,
+        fileId,
+        status: 'waiting',
+        canAbort: false,
+      }
+      uploadingFiles.value.set(fileId, uploadingFile)
+    }
+
+    // 触发队列更新
+    uploadingFiles.value = new Map(uploadingFiles.value)
+
+    // 动态并发上传，始终保持 CONCURRENT_LIMIT 个文件在上传
+    const CONCURRENT_LIMIT = 3 // 限制同时上传的文件数量
+    const uploadedPhotoIds = new Map<File, string>()
+
+    // 启动上传任务的函数
+    const startUpload = async (
+      file: File,
+      pairedPhotoId?: string,
+    ): Promise<void> => {
+      const fileId = fileIdMapping.get(file)!
+      try {
+        const finalizedPhotoId = await uploadImage(
+          file,
+          fileId,
+          uploadEraseLocationEnabled.value,
+          pairedPhotoId,
+        )
+        if (!isVideoUploadFile(file) && finalizedPhotoId) {
+          uploadedPhotoIds.set(file, finalizedPhotoId)
+        }
+      } catch (error: any) {
+        errors.push(`${file.name}: ${error.message || '上传失败'}`)
+        console.error('上传错误:', error)
       }
     }
+
+    // 处理队列的函数
+    const processQueue = async (
+      fileQueue: File[],
+      pairedPhotoIdForFile?: (file: File) => string | undefined,
+    ): Promise<void> => {
+      const activeUploads = new Set<Promise<void>>()
+
+      while (fileQueue.length > 0 || activeUploads.size > 0) {
+        // 如果当前活跃上传数量小于限制，且队列中还有文件，则启动新的上传
+        while (activeUploads.size < CONCURRENT_LIMIT && fileQueue.length > 0) {
+          const file = fileQueue.shift()!
+          const uploadPromise = startUpload(file, pairedPhotoIdForFile?.(file))
+
+          activeUploads.add(uploadPromise)
+
+          // 当上传完成时，从活跃集合中移除
+          uploadPromise.finally(() => {
+            activeUploads.delete(uploadPromise)
+          })
+        }
+
+        // 如果有活跃的上传，等待至少一个完成
+        if (activeUploads.size > 0) {
+          await Promise.race(activeUploads)
+        }
+      }
+    }
+
+    // Cloudflare Stream finalization pairs videos with an existing image record.
+    // Finish all image uploads/finalization before creating any Stream intent.
+    const imageFiles = validFiles.filter((file) => !isVideoUploadFile(file))
+    const videoFiles = validFiles.filter(isVideoUploadFile)
+    await processQueue([...imageFiles])
+
+    // A basename must resolve to exactly one D1 photo. Merge already-visible
+    // dashboard records with images finalized in this batch, deduplicating the
+    // same photo ID (for example when duplicate mode skipped an image upload).
+    const candidateIdsByBasename = new Map<string, Set<string>>()
+    const addPairCandidate = (sourceName: string, photoId: string) => {
+      const basename = uploadSourceBasename(sourceName)
+      if (!basename || !photoId) return
+      const candidateIds = candidateIdsByBasename.get(basename) ?? new Set()
+      candidateIds.add(photoId)
+      candidateIdsByBasename.set(basename, candidateIds)
+    }
+
+    for (const photo of photos.value) {
+      const sourceName = photo.sourceFilename?.trim() || photo.title?.trim()
+      if (sourceName) addPairCandidate(sourceName, photo.id)
+    }
+    for (const [file, photoId] of uploadedPhotoIds) {
+      addPairCandidate(file.name, photoId)
+    }
+
+    const videoCountByBasename = new Map<string, number>()
+    for (const file of videoFiles) {
+      const basename = uploadSourceBasename(file.name)
+      videoCountByBasename.set(
+        basename,
+        (videoCountByBasename.get(basename) ?? 0) + 1,
+      )
+    }
+
+    const pairedPhotoIds = new Map<File, string>()
+    const pairingErrors: string[] = []
+    for (const file of videoFiles) {
+      const basename = uploadSourceBasename(file.name)
+      const candidateIds = candidateIdsByBasename.get(basename) ?? new Set()
+      let pairingError: string | undefined
+
+      if ((videoCountByBasename.get(basename) ?? 0) > 1) {
+        pairingError = `Multiple videos share basename "${basename}"`
+      } else if (candidateIds.size === 0) {
+        pairingError = `No photo matches basename "${basename}"`
+      } else if (candidateIds.size > 1) {
+        pairingError = `${candidateIds.size} photos match basename "${basename}"`
+      }
+
+      if (pairingError) {
+        const message = `${file.name}: ${pairingError}; Stream upload was not created`
+        pairingErrors.push(message)
+        errors.push(message)
+        const fileId = fileIdMapping.get(file)!
+        const uploadingFile = uploadingFiles.value.get(fileId)
+        if (uploadingFile) {
+          uploadingFile.status = 'error'
+          uploadingFile.canAbort = false
+          uploadingFile.error = pairingError
+        }
+        continue
+      }
+
+      const photoId = candidateIds.values().next().value
+      if (typeof photoId === 'string') pairedPhotoIds.set(file, photoId)
+    }
+    uploadingFiles.value = new Map(uploadingFiles.value)
+
+    if (pairingErrors.length > 0) {
+      toast.add({
+        title: $t('dashboard.photos.messages.error'),
+        description: pairingErrors.join('\n'),
+        color: 'error',
+      })
+    }
+
+    const pairedVideoFiles = videoFiles.filter((file) =>
+      pairedPhotoIds.has(file),
+    )
+    await processQueue([...pairedVideoFiles], (file) =>
+      pairedPhotoIds.get(file),
+    )
+
+    if (errors.length > 0) {
+      console.error('批量上传错误详情:', errors)
+    }
+
+    // 清空选中的文件
+    selectedFiles.value = []
+    isUploadSlideoverOpen.value = false
+  } finally {
+    isBatchUploading.value = false
   }
-
-  // 开始处理队列
-  await processQueue()
-
-  if (errors.length > 0) {
-    console.error('批量上传错误详情:', errors)
-  }
-
-  // 清空选中的文件
-  selectedFiles.value = []
-  isUploadSlideoverOpen.value = false
 }
 
 const openMetadataEditor = (photo: Photo) => {
@@ -1575,7 +1958,7 @@ const handleReprocessSingle = async (photo: Photo) => {
   }
 }
 
-const getRowActions = (photo: Photo) => {
+const getRowActions = (photo: Photo): DropdownMenuItem[][] => {
   const isReverseLoading = !!reverseGeocodeLoading.value[photo.id]
   const isEraseLocationLoading = !!eraseLocationLoading.value[photo.id]
 
@@ -1665,8 +2048,8 @@ const handleSingleDeleteRequest = (photo: Photo) => {
 // 批量删除功能
 const handleBatchDelete = () => {
   const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
-  const selectedPhotos =
-    selectedRowModel?.rows.map((row: any) => row.original) || []
+  const selectedPhotos: Photo[] =
+    selectedRowModel?.rows.map((row: { original: Photo }) => row.original) || []
 
   if (selectedPhotos.length === 0) {
     toast.add({
@@ -1855,7 +2238,7 @@ const handleBatchEraseLocation = async () => {
 
   const targetPhotoIds = selectedPhotos
     .map((photo: Photo) => photo.id)
-    .filter((id): id is string => !!id)
+    .filter((id: string): id is string => !!id)
 
   if (targetPhotoIds.length === 0) {
     toast.add({
@@ -1874,7 +2257,7 @@ const handleBatchEraseLocation = async () => {
     const result = await $fetch('/api/queue/add-tasks', {
       method: 'POST',
       body: {
-        tasks: targetPhotoIds.map((photoId) => ({
+        tasks: targetPhotoIds.map((photoId: string) => ({
           payload: {
             type: 'photo-erase-location',
             photoId,
@@ -1923,6 +2306,42 @@ const handleBatchEraseLocation = async () => {
   }
 }
 
+type PhotoWithSourceFilename = Photo & {
+  sourceFilename?: string | null
+}
+
+const getPhotoDownloadFilename = (
+  photo: PhotoWithSourceFilename,
+  contentType: string,
+) => {
+  const preferredName =
+    photo.sourceFilename?.trim() || photo.title?.trim() || `photo-${photo.id}`
+  const leafName = preferredName.split(/[\\/]/).pop() || `photo-${photo.id}`
+  const invalidFilenameCharacters = '<>:"/\\|?*'
+  const safeName = Array.from(leafName, (character) =>
+    character.charCodeAt(0) <= 0x1f ||
+    invalidFilenameCharacters.includes(character)
+      ? '_'
+      : character,
+  ).join('')
+
+  if (/\.[a-z0-9]{1,10}$/i.test(safeName)) {
+    return safeName
+  }
+
+  const extensionByContentType: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'image/webp': 'webp',
+    'image/avif': 'avif',
+    'video/quicktime': 'mov',
+  }
+  const extension = extensionByContentType[contentType]
+  return extension ? `${safeName}.${extension}` : safeName
+}
+
 // 批量下载照片
 const handleBatchDownload = async () => {
   const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
@@ -1938,10 +2357,8 @@ const handleBatchDownload = async () => {
     return
   }
 
-  // 检查所有选中照片是否都有 originalUrl
-  const photosWithUrl = selectedPhotos.filter(
-    (photo: Photo) => photo.originalUrl,
-  )
+  // Raw Hosted Images sources are available only through the admin route.
+  const photosWithUrl = selectedPhotos.filter((photo: Photo) => photo.sourceUrl)
   if (photosWithUrl.length === 0) {
     toast.add({
       title: $t('dashboard.photos.messages.error'),
@@ -1976,7 +2393,7 @@ const handleBatchDownload = async () => {
   try {
     for (const photo of photosWithUrl) {
       try {
-        const response = await fetch(photo.originalUrl!)
+        const response = await fetch(photo.sourceUrl!)
         if (!response.ok) {
           failureCount++
           continue
@@ -1986,8 +2403,7 @@ const handleBatchDownload = async () => {
         const url = window.URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        const extension = photo.originalUrl!.split('.').pop() || 'jpg'
-        link.download = `${photo.title || `photo-${photo.id}`}.${extension}`
+        link.download = getPhotoDownloadFilename(photo, blob.type)
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
@@ -2047,6 +2463,10 @@ watch(isImagePreviewOpen, (open) => {
 
 // 清理定时器
 onUnmounted(() => {
+  uploadingFiles.value.forEach((uploadingFile) => {
+    uploadingFile.abortUpload?.()
+  })
+
   // 清理所有状态检查定时器
   statusIntervals.value.forEach((intervalId) => {
     clearInterval(intervalId)
@@ -2116,13 +2536,14 @@ onUnmounted(() => {
                 :label="$t('dashboard.photos.uploader.label')"
                 :description="
                   $t('dashboard.photos.uploader.description', {
-                    maxSize: maxFileSizeMB,
+                    imageMaxSize: imageSourceMaxUploadMiB,
+                    videoMaxSize: streamMaxUploadMiB,
                   })
                 "
                 icon="tabler:cloud-upload"
                 layout="list"
                 size="xl"
-                accept="image/jpeg,image/png,image/heic,image/heif,video/quicktime,.mov"
+                accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/heic,image/heif,.mp4,.m4v,.mkv,.mov,.qt,.avi,.flv,.ts,.mts,.m2ts,.mpeg,.mpg,.m2p,.vob,.mxf,.lxf,.gxf,.3gp,.3g2,.webm"
                 multiple
                 highlight
                 dropzone
@@ -2203,7 +2624,8 @@ onUnmounted(() => {
                   size="lg"
                   class="w-full sm:w-auto"
                   icon="tabler:upload"
-                  :disabled="!hasSelectedFiles"
+                  :disabled="!hasSelectedFiles || isBatchUploading"
+                  :loading="isBatchUploading"
                   @click="handleUpload"
                 >
                   {{
@@ -2242,300 +2664,289 @@ onUnmounted(() => {
                 {{ $t('dashboard.photos.toolbar.title') }}
               </span>
               <div class="flex items-center gap-1 sm:gap-2 sm:ml-1">
-              <UBadge
-                v-if="livePhotoStats.staticPhotos > 0"
-                variant="soft"
-                color="neutral"
-                size="sm"
-              >
-                <span class="hidden sm:inline"
-                  >{{ livePhotoStats.staticPhotos }}
-                  {{ $t('dashboard.photos.stats.photos') }}</span
-                >
-                <span class="sm:hidden"
-                  >{{ livePhotoStats.staticPhotos }}P</span
-                >
-              </UBadge>
-              <UBadge
-                v-if="livePhotoStats.livePhotos > 0"
-                variant="soft"
-                color="warning"
-                size="sm"
-              >
-                <span class="hidden sm:inline"
-                  >{{ livePhotoStats.livePhotos }}
-                  {{ $t('dashboard.photos.stats.livePhotos') }}</span
-                >
-                <span class="sm:hidden">{{ livePhotoStats.livePhotos }}LP</span>
-              </UBadge>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <UPopover>
-              <UTooltip :text="$t('ui.action.filter.tooltip')">
-                <UChip
-                  inset
+                <UBadge
+                  v-if="livePhotoStats.staticPhotos > 0"
+                  variant="soft"
+                  color="neutral"
                   size="sm"
-                  color="info"
-                  :show="totalSelectedFilters > 0"
                 >
-                  <UButton
-                    variant="soft"
-                    :color="hasActiveFilters ? 'info' : 'neutral'"
-                    class="bg-transparent rounded-full cursor-pointer relative"
-                    icon="tabler:filter"
+                  <span class="hidden sm:inline"
+                    >{{ livePhotoStats.staticPhotos }}
+                    {{ $t('dashboard.photos.stats.photos') }}</span
+                  >
+                  <span class="sm:hidden"
+                    >{{ livePhotoStats.staticPhotos }}P</span
+                  >
+                </UBadge>
+                <UBadge
+                  v-if="livePhotoStats.livePhotos > 0"
+                  variant="soft"
+                  color="warning"
+                  size="sm"
+                >
+                  <span class="hidden sm:inline"
+                    >{{ livePhotoStats.livePhotos }}
+                    {{ $t('dashboard.photos.stats.livePhotos') }}</span
+                  >
+                  <span class="sm:hidden"
+                    >{{ livePhotoStats.livePhotos }}LP</span
+                  >
+                </UBadge>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <UPopover>
+                <UTooltip :text="$t('ui.action.filter.tooltip')">
+                  <UChip
+                    inset
                     size="sm"
-                  />
-                </UChip>
-              </UTooltip>
+                    color="info"
+                    :show="totalSelectedFilters > 0"
+                  >
+                    <UButton
+                      variant="soft"
+                      :color="hasActiveFilters ? 'info' : 'neutral'"
+                      class="bg-transparent rounded-full cursor-pointer relative"
+                      icon="tabler:filter"
+                      size="sm"
+                    />
+                  </UChip>
+                </UTooltip>
 
-              <template #content>
-                <UCard variant="glassmorphism">
-                  <OverlayFilterPanel />
-                </UCard>
-              </template>
-            </UPopover>
-            <!-- 过滤器 -->
-            <USelectMenu
-              v-model="photoFilter"
-              class="w-full sm:w-48"
-              :items="[
-                {
-                  label: $t('dashboard.photos.photoFilter.all'),
-                  value: 'all',
-                  icon: 'tabler:photo-scan',
-                },
-                {
-                  label: $t('dashboard.photos.photoFilter.livephoto'),
-                  value: 'livephoto',
-                  icon: 'tabler:live-photo',
-                },
-                {
-                  label: $t('dashboard.photos.photoFilter.static'),
-                  value: 'static',
-                  icon: 'tabler:photo',
-                },
-              ]"
-              value-key="value"
-              label-key="label"
-              size="sm"
-            >
-            </USelectMenu>
-
-            <!-- 刷新按钮 -->
-            <UButton
-              variant="soft"
-              color="info"
-              size="sm"
-              icon="tabler:refresh"
-              :loading="reactionsLoading"
-              @click="
-                async () => {
-                  await refresh()
-                  if (filteredData.length > 0) {
-                    await fetchReactions(filteredData.map((p: Photo) => p.id))
-                  }
-                }
-              "
-            >
-              <span class="hidden sm:inline">{{
-                $t('dashboard.photos.toolbar.refresh')
-              }}</span>
-            </UButton>
-
-            <!-- 列可见性按钮 -->
-            <UDropdownMenu
-              :items="
-                table?.tableApi
-                  ?.getAllColumns()
-                  .filter((column: any) => column.getCanHide())
-                  .map((column: any) => ({
-                    label: columnNameMap[column.id] || column.id,
-                    type: 'checkbox' as const,
-                    checked: column.getIsVisible(),
-                    disabled:
-                      !column.getCanHide() ||
-                      column.id === 'thumbnailUrl' ||
-                      column.id === 'id' ||
-                      column.id === 'actions',
-                    onUpdateChecked(checked: boolean) {
-                      table?.tableApi
-                        ?.getColumn(column.id)
-                        ?.toggleVisibility(!!checked)
-                    },
-                    onSelect(e: Event) {
-                      e.preventDefault()
-                    },
-                  }))
-              "
-              :content="{ align: 'end' }"
-            >
-              <UButton
-                label=""
-                color="neutral"
-                variant="outline"
+                <template #content>
+                  <UCard variant="glassmorphism">
+                    <OverlayFilterPanel />
+                  </UCard>
+                </template>
+              </UPopover>
+              <!-- 过滤器 -->
+              <USelectMenu
+                v-model="photoFilter"
+                class="w-full sm:w-48"
+                :items="[
+                  {
+                    label: $t('dashboard.photos.photoFilter.all'),
+                    value: 'all',
+                    icon: 'tabler:photo-scan',
+                  },
+                  {
+                    label: $t('dashboard.photos.photoFilter.livephoto'),
+                    value: 'livephoto',
+                    icon: 'tabler:live-photo',
+                  },
+                  {
+                    label: $t('dashboard.photos.photoFilter.static'),
+                    value: 'static',
+                    icon: 'tabler:photo',
+                  },
+                ]"
+                value-key="value"
+                label-key="label"
                 size="sm"
-                icon="tabler:columns-3"
-                :title="
-                  $t('dashboard.photos.table.columnVisibility.description')
+              >
+              </USelectMenu>
+
+              <!-- 刷新按钮 -->
+              <UButton
+                variant="soft"
+                color="info"
+                size="sm"
+                icon="tabler:refresh"
+                :loading="reactionsLoading"
+                @click="
+                  async () => {
+                    await refresh()
+                    if (filteredData.length > 0) {
+                      await fetchReactions(filteredData.map((p: Photo) => p.id))
+                    }
+                  }
                 "
               >
                 <span class="hidden sm:inline">{{
-                  $t('dashboard.photos.table.columnVisibility.button')
+                  $t('dashboard.photos.toolbar.refresh')
                 }}</span>
               </UButton>
-            </UDropdownMenu>
+
+              <!-- 列可见性按钮 -->
+              <UDropdownMenu
+                :items="
+                  table?.tableApi
+                    ?.getAllColumns()
+                    .filter((column: any) => column.getCanHide())
+                    .map((column: any) => ({
+                      label: columnNameMap[column.id] || column.id,
+                      type: 'checkbox' as const,
+                      checked: column.getIsVisible(),
+                      disabled:
+                        !column.getCanHide() ||
+                        column.id === 'thumbnailUrl' ||
+                        column.id === 'id' ||
+                        column.id === 'actions',
+                      onUpdateChecked(checked: boolean) {
+                        table?.tableApi
+                          ?.getColumn(column.id)
+                          ?.toggleVisibility(!!checked)
+                      },
+                      onSelect(e: Event) {
+                        e.preventDefault()
+                      },
+                    }))
+                "
+                :content="{ align: 'end' }"
+              >
+                <UButton
+                  label=""
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  icon="tabler:columns-3"
+                  :title="
+                    $t('dashboard.photos.table.columnVisibility.description')
+                  "
+                >
+                  <span class="hidden sm:inline">{{
+                    $t('dashboard.photos.table.columnVisibility.button')
+                  }}</span>
+                </UButton>
+              </UDropdownMenu>
+            </div>
+          </div>
+
+          <!-- 照片列表 -->
+          <div class="relative flex-1 min-h-0 flex flex-col">
+            <UTable
+              ref="table"
+              v-model:row-selection="rowSelection"
+              v-model:column-visibility="columnVisibility"
+              :column-pinning="{
+                right: ['actions'],
+              }"
+              :data="filteredData as Photo[]"
+              :columns="columns"
+              :loading="status === 'pending'"
+              sticky
+              class="h-full flex-1"
+              :ui="{
+                root: 'relative h-full overflow-auto scroll-smooth',
+                base: 'min-w-full table-fixed',
+                thead:
+                  'bg-neutral-50/80 dark:bg-neutral-900/80 backdrop-blur-md sticky top-0 z-10 whitespace-nowrap',
+                tbody:
+                  'divide-y divide-neutral-200/80 dark:divide-neutral-800/80 bg-white dark:bg-neutral-900',
+                tr: 'transition-colors hover:bg-neutral-50/50 data-[selected=true]:bg-primary-50/50 dark:hover:bg-neutral-800/50 dark:data-[selected=true]:bg-primary-900/20',
+                th: 'px-4 py-3.5 text-left text-sm font-medium text-neutral-500 rtl:text-right dark:text-neutral-400',
+                td: 'px-4 py-3 text-sm text-neutral-700 dark:text-neutral-300',
+                separator: 'bg-neutral-200/80 dark:bg-neutral-800/80',
+              }"
+            >
+              <template #actions-cell="{ row }">
+                <div class="flex justify-end">
+                  <UDropdownMenu
+                    size="sm"
+                    :content="{
+                      align: 'end',
+                    }"
+                    :items="getRowActions(row.original)"
+                  >
+                    <UButton
+                      variant="outline"
+                      color="neutral"
+                      size="sm"
+                      icon="tabler:dots-vertical"
+                    />
+                  </UDropdownMenu>
+                </div>
+              </template>
+            </UTable>
+
+            <!-- 悬浮版批量操作菜单 -->
+            <transition
+              enter-active-class="transition-all duration-300 ease-out"
+              enter-from-class="translate-y-8 opacity-0 scale-95"
+              enter-to-class="translate-y-0 opacity-100 scale-100"
+              leave-active-class="transition-all duration-200 ease-in"
+              leave-from-class="translate-y-0 opacity-100 scale-100"
+              leave-to-class="translate-y-8 opacity-0 scale-95"
+            >
+              <div
+                v-if="selectedRowsCount > 0"
+                class="fixed bottom-8 left-1/2 -translate-x-1/2 px-2 py-1.5 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-xl shadow-xl rounded-full border border-neutral-200/80 dark:border-neutral-800/80 z-60 flex items-center gap-3 sm:gap-6 shadow-black/5 dark:shadow-black/20"
+              >
+                <div
+                  class="pl-4 pr-1 border-r border-neutral-200 dark:border-neutral-800 min-w-max"
+                >
+                  <p
+                    class="text-sm font-medium tracking-wide text-neutral-700 dark:text-neutral-200"
+                  >
+                    {{
+                      $t('dashboard.photos.selection.selected', {
+                        count: selectedRowsCount,
+                        total: totalRowsCount,
+                      })
+                    }}
+                  </p>
+                </div>
+
+                <div class="flex items-center gap-1 sm:gap-1.5 pr-2">
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
+                    icon="tabler:refresh"
+                    @click="handleBatchReprocess"
+                  >
+                    <span class="hidden sm:inline">{{
+                      $t('dashboard.photos.selection.batchReprocess')
+                    }}</span>
+                  </UButton>
+
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
+                    icon="tabler:map-off"
+                    @click="handleBatchEraseLocation"
+                  >
+                    <span class="hidden sm:inline">{{
+                      $t('dashboard.photos.selection.batchEraseLocation')
+                    }}</span>
+                  </UButton>
+
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
+                    icon="tabler:download"
+                    @click="handleBatchDownload"
+                  >
+                    <span class="hidden sm:inline">{{
+                      $t('dashboard.photos.selection.batchDownload')
+                    }}</span>
+                  </UButton>
+
+                  <UButton
+                    color="error"
+                    variant="ghost"
+                    size="sm"
+                    class="rounded-full hover:bg-error-50 dark:hover:bg-error-500/20"
+                    icon="tabler:trash"
+                    @click="handleBatchDelete"
+                  >
+                    <span class="hidden sm:inline">{{
+                      $t('dashboard.photos.selection.batchDelete')
+                    }}</span>
+                  </UButton>
+                </div>
+              </div>
+            </transition>
           </div>
         </div>
 
-        <!-- 照片列表 -->
-        <div class="relative flex-1 min-h-0 flex flex-col">
-          <UTable
-            ref="table"
-            v-model:row-selection="rowSelection"
-            v-model:column-visibility="columnVisibility"
-            :column-pinning="{
-              right: ['actions'],
-            }"
-            :data="filteredData as Photo[]"
-            :columns="columns"
-            :loading="status === 'pending'"
-            sticky
-            class="h-full flex-1"
-            :ui="{
-              wrapper: 'relative scroll-smooth h-full overflow-auto',
-              base: 'min-w-full table-fixed',
-              divide:
-                'divide-y divide-neutral-200/80 dark:divide-neutral-800/80',
-              thead:
-                'bg-neutral-50/80 dark:bg-neutral-900/80 backdrop-blur-md sticky top-0 z-10 whitespace-nowrap',
-              tbody:
-                'divide-y divide-neutral-200/80 dark:divide-neutral-800/80 bg-white dark:bg-neutral-900',
-              tr: {
-                base: 'hover:bg-neutral-50/50 dark:hover:bg-neutral-800/50 transition-colors',
-                selected: 'bg-primary-50/50 dark:bg-primary-900/20',
-              },
-              th: {
-                base: 'text-left rtl:text-right ',
-                padding: 'px-4 py-3.5',
-                color: 'text-neutral-500 dark:text-neutral-400',
-                font: 'font-medium text-sm',
-              },
-              td: {
-                padding: 'px-4 py-3',
-                color: 'text-neutral-700 dark:text-neutral-300 text-sm',
-              },
-              separator: 'bg-neutral-200/80 dark:bg-neutral-800/80',
-            }"
-          >
-            <template #actions-cell="{ row }">
-              <div class="flex justify-end">
-                <UDropdownMenu
-                  size="sm"
-                  :content="{
-                    align: 'end',
-                  }"
-                  :items="getRowActions(row.original)"
-                >
-                  <UButton
-                    variant="outline"
-                    color="neutral"
-                    size="sm"
-                    icon="tabler:dots-vertical"
-                  />
-                </UDropdownMenu>
-              </div>
-            </template>
-          </UTable>
-
-          <!-- 悬浮版批量操作菜单 -->
-          <transition
-            enter-active-class="transition-all duration-300 ease-out"
-            enter-from-class="translate-y-8 opacity-0 scale-95"
-            enter-to-class="translate-y-0 opacity-100 scale-100"
-            leave-active-class="transition-all duration-200 ease-in"
-            leave-from-class="translate-y-0 opacity-100 scale-100"
-            leave-to-class="translate-y-8 opacity-0 scale-95"
-          >
-            <div
-              v-if="selectedRowsCount > 0"
-              class="fixed bottom-8 left-1/2 -translate-x-1/2 px-2 py-1.5 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-xl shadow-xl rounded-full border border-neutral-200/80 dark:border-neutral-800/80 z-60 flex items-center gap-3 sm:gap-6 shadow-black/5 dark:shadow-black/20"
-            >
-              <div
-                class="pl-4 pr-1 border-r border-neutral-200 dark:border-neutral-800 min-w-max"
-              >
-                <p
-                  class="text-sm font-medium tracking-wide text-neutral-700 dark:text-neutral-200"
-                >
-                  {{
-                    $t('dashboard.photos.selection.selected', {
-                      count: selectedRowsCount,
-                      total: totalRowsCount,
-                    })
-                  }}
-                </p>
-              </div>
-
-              <div class="flex items-center gap-1 sm:gap-1.5 pr-2">
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
-                  icon="tabler:refresh"
-                  @click="handleBatchReprocess"
-                >
-                  <span class="hidden sm:inline">{{
-                    $t('dashboard.photos.selection.batchReprocess')
-                  }}</span>
-                </UButton>
-
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
-                  icon="tabler:map-off"
-                  @click="handleBatchEraseLocation"
-                >
-                  <span class="hidden sm:inline">{{
-                    $t('dashboard.photos.selection.batchEraseLocation')
-                  }}</span>
-                </UButton>
-
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  class="rounded-full text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-white dark:hover:bg-neutral-800"
-                  icon="tabler:download"
-                  @click="handleBatchDownload"
-                >
-                  <span class="hidden sm:inline">{{
-                    $t('dashboard.photos.selection.batchDownload')
-                  }}</span>
-                </UButton>
-
-                <UButton
-                  color="error"
-                  variant="ghost"
-                  size="sm"
-                  class="rounded-full hover:bg-error-50 dark:hover:bg-error-500/20"
-                  icon="tabler:trash"
-                  @click="handleBatchDelete"
-                >
-                  <span class="hidden sm:inline">{{
-                    $t('dashboard.photos.selection.batchDelete')
-                  }}</span>
-                </UButton>
-              </div>
-            </div>
-          </transition>
-        </div>
-      </div>
-
-      <USlideover
+        <USlideover
           v-model:open="isEditModalOpen"
           :title="$t('dashboard.photos.editModal.title')"
           :description="$t('dashboard.photos.editModal.description')"

@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chronoframe",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2026-07-17",
+  "compatibility_flags": ["nodejs_compat"],
+  // Preserve values configured in the dashboard when deploying this file.
+  // Secrets such as NUXT_SESSION_PASSWORD, CFRAME_BOOTSTRAP_TOKEN, and
+  // CFRAME_STREAM_WEBHOOK_SECRET still belong in Wrangler secrets. `keep_vars`
+  // preserves dashboard values but does not declare or upload those secrets.
+  "keep_vars": true,
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".output/public",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "chronoframe-db",
+      "database_id": "d473d6fa-3a54-4584-8ef2-49b1e704cd00",
+      "migrations_dir": "server/database/migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "chronoframe-storage",
+    },
+  ],
+  "images": {
+    "binding": "IMAGES",
+  },
+  "stream": {
+    "binding": "STREAM",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

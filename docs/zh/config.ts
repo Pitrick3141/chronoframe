@@ -17,6 +17,10 @@ export default defineConfig({
         text: '指南',
         items: [
           { text: '快速开始', link: '/zh/guide/getting-started' },
+          {
+            text: '迁移到 Workers',
+            link: '/zh/guide/migrate-to-workers',
+          },
           { text: '配置说明', link: '/zh/guide/configuration' },
           { text: '升级指南', link: '/zh/guide/updates' },
         ],

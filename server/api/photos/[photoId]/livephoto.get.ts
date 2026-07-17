@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm'
 
+import { photoForClient } from '../../../utils/photo-response'
+
 export default eventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
   const photoId = getRouterParam(event, 'photoId')
 
@@ -12,38 +14,32 @@ export default eventHandler(async (event) => {
     })
   }
 
-  try {
-    const db = useDB()
+  const photo = await useDB()
+    .select()
+    .from(tables.photos)
+    .where(eq(tables.photos.id, photoId))
+    .get()
 
-    // 查询照片信息
-    const photos = await db
-      .select()
-      .from(tables.photos)
-      .where(eq(tables.photos.id, photoId))
-      .limit(1)
-
-    if (photos.length === 0) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: 'Photo not found',
-      })
-    }
-
-    const photo = photos[0]
-
-    return {
-      id: photo.id,
-      title: photo.title,
-      isLivePhoto: Boolean(photo.isLivePhoto),
-      livePhotoVideoUrl: photo.livePhotoVideoUrl,
-      originalUrl: photo.originalUrl,
-      thumbnailUrl: photo.thumbnailUrl,
-    }
-  } catch (error) {
-    logger.chrono.error('Failed to get photo details:', error)
+  if (!photo) {
     throw createError({
-      statusCode: 500,
-      statusMessage: 'Failed to get photo details',
+      statusCode: 404,
+      statusMessage: 'Photo not found',
     })
+  }
+
+  const clientPhoto = photoForClient(photo, { includeSource: true })
+
+  return {
+    id: photo.id,
+    title: photo.title,
+    isLivePhoto: Boolean(photo.isLivePhoto),
+    livePhotoVideoUrl: clientPhoto.livePhotoVideoUrl,
+    cloudflareStreamId: photo.cloudflareStreamId,
+    streamStatus: photo.streamStatus,
+    streamThumbnailUrl: photo.streamThumbnailUrl,
+    streamDashUrl: clientPhoto.streamDashUrl,
+    streamDuration: photo.streamDuration,
+    originalUrl: photo.originalUrl,
+    thumbnailUrl: photo.thumbnailUrl,
   }
 })

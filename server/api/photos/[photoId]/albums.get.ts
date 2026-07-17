@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import z from 'zod'
 
 export default eventHandler(async (event) => {
@@ -10,6 +10,8 @@ export default eventHandler(async (event) => {
   )
 
   const db = useDB()
+  const session = await getUserSession(event)
+  const isAdmin = session.user?.isAdmin === 1
 
   // 获取包含该照片的所有相册
   const albums = await db
@@ -26,7 +28,14 @@ export default eventHandler(async (event) => {
       tables.albumPhotos,
       eq(tables.albums.id, tables.albumPhotos.albumId),
     )
-    .where(eq(tables.albumPhotos.photoId, photoId))
+    .where(
+      isAdmin
+        ? eq(tables.albumPhotos.photoId, photoId)
+        : and(
+            eq(tables.albumPhotos.photoId, photoId),
+            eq(tables.albums.isHidden, false),
+          ),
+    )
     .all()
 
   return albums

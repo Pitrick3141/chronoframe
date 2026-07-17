@@ -1,17 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import { z } from 'zod'
-import { exiftool } from 'exiftool-vendored'
 import { eq } from 'drizzle-orm'
+import { z } from 'zod'
 
-import { extractExifData } from '~~/server/services/image/exif'
-import { tables, useDB } from '~~/server/utils/db'
-import { useStorageProvider } from '~~/server/utils/useStorageProvider'
+import { photoForClient } from '../../../utils/photo-response'
 
-const paramsSchema = z.object({
-  photoId: z.string().min(1),
-})
+const paramsSchema = z.object({ photoId: z.string().min(1) })
 
 const bodySchema = z.object({
   title: z.string().trim().max(512).optional(),
@@ -29,35 +21,37 @@ const bodySchema = z.object({
   rating: z.union([z.number().int().min(0).max(5), z.null()]).optional(),
 })
 
-const normalizeTags = (tags: string[] | undefined) => {
+const LOCATION_EXIF_KEYS = [
+  'GPSLatitude',
+  'GPSLatitudeRef',
+  'GPSLongitude',
+  'GPSLongitudeRef',
+  'GPSPosition',
+  'GPSCoordinates',
+  'GPSAltitude',
+  'GPSAltitudeRef',
+] as const
+
+function normalizeTags(tags: string[] | undefined) {
   if (!tags) return undefined
+
   const seen = new Set<string>()
-  const normalized: string[] = []
-  for (const rawTag of tags) {
-    const trimmed = rawTag.trim()
-    if (!trimmed) continue
-    const key = trimmed.toLowerCase()
-    if (seen.has(key)) continue
+  return tags.filter((tag) => {
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) return false
     seen.add(key)
-    normalized.push(trimmed)
-  }
-  return normalized
+    return true
+  })
 }
 
 export default eventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
   const t = await useTranslation(event)
   const { photoId } = paramsSchema.parse(event.context.params ?? {})
   const payload = bodySchema.parse(await readBody(event))
 
-  if (
-    payload.title === undefined &&
-    payload.description === undefined &&
-    payload.tags === undefined &&
-    payload.location === undefined &&
-    payload.rating === undefined
-  ) {
+  if (Object.values(payload).every((value) => value === undefined)) {
     throw createError({
       statusCode: 400,
       statusMessage: t('dashboard.photos.messages.noChangesProvided'),
@@ -78,195 +72,77 @@ export default eventHandler(async (event) => {
     })
   }
 
-  if (!photo.storageKey) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: t('dashboard.photos.messages.noStorageKey'),
-    })
+  const exif: Record<string, unknown> =
+    photo.exif && typeof photo.exif === 'object' ? { ...photo.exif } : {}
+  const updateData: Partial<typeof tables.photos.$inferInsert> = {
+    lastModified: new Date().toISOString(),
   }
 
-  const { storageProvider } = useStorageProvider(event)
-  const originalBuffer = await storageProvider.get(photo.storageKey)
-
-  if (!originalBuffer) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: t('dashboard.photos.messages.photoFileMissing'),
-    })
+  if (payload.title !== undefined) {
+    updateData.title = payload.title || null
+    exif.Title = payload.title || null
+    exif.XPTitle = payload.title || null
   }
 
-  const normalizedTitle =
-    payload.title !== undefined ? payload.title.trim() : undefined
-  const normalizedDescription =
-    payload.description !== undefined ? payload.description.trim() : undefined
-  const normalizedTags = normalizeTags(payload.tags)
-  let pendingReverseGeocode: {
-    latitude: number
-    longitude: number
-  } | null = null
-
-  const exifUpdates: Record<string, any> = {}
-
-  if (normalizedTitle !== undefined) {
-    const titleValue = normalizedTitle.length > 0 ? normalizedTitle : null
-    exifUpdates.Title = titleValue
-    exifUpdates.XPTitle = titleValue
+  if (payload.description !== undefined) {
+    updateData.description = payload.description || null
+    exif.Description = payload.description || null
+    exif.ImageDescription = payload.description || null
+    exif.CaptionAbstract = payload.description || null
+    exif.XPComment = payload.description || null
+    exif.UserComment = payload.description || null
   }
 
-  if (normalizedDescription !== undefined) {
-    const descriptionValue =
-      normalizedDescription.length > 0 ? normalizedDescription : null
-    exifUpdates.Description = descriptionValue
-    exifUpdates.ImageDescription = descriptionValue
-    exifUpdates.CaptionAbstract = descriptionValue
-    exifUpdates.XPComment = descriptionValue
-    exifUpdates.UserComment = descriptionValue
-  }
-
-  if (normalizedTags !== undefined) {
-    const tagsValue = normalizedTags.length > 0 ? normalizedTags : null
-    exifUpdates.Subject = tagsValue
-    exifUpdates.Keywords = tagsValue
-    exifUpdates.XPKeywords =
-      normalizedTags.length > 0 ? normalizedTags.join('; ') : null
+  if (payload.tags !== undefined) {
+    const tags = normalizeTags(payload.tags) ?? []
+    updateData.tags = tags
+    exif.Subject = tags.length > 0 ? tags : null
+    exif.Keywords = tags.length > 0 ? tags : null
+    exif.XPKeywords = tags.length > 0 ? tags.join('; ') : null
   }
 
   if (payload.location !== undefined) {
+    updateData.country = null
+    updateData.city = null
+    updateData.locationName = null
+
     if (payload.location) {
       const { latitude, longitude } = payload.location
-      const latAbs = Math.abs(latitude)
-      const lonAbs = Math.abs(longitude)
-      exifUpdates.GPSLatitude = latAbs
-      exifUpdates.GPSLatitudeRef = latitude >= 0 ? 'N' : 'S'
-      exifUpdates.GPSLongitude = lonAbs
-      exifUpdates.GPSLongitudeRef = longitude >= 0 ? 'E' : 'W'
-      exifUpdates.GPSPosition = `${latitude} ${longitude}`
+      updateData.latitude = latitude
+      updateData.longitude = longitude
+      exif.GPSLatitude = Math.abs(latitude)
+      exif.GPSLatitudeRef = latitude >= 0 ? 'N' : 'S'
+      exif.GPSLongitude = Math.abs(longitude)
+      exif.GPSLongitudeRef = longitude >= 0 ? 'E' : 'W'
+      exif.GPSPosition = `${latitude} ${longitude}`
     } else {
-      exifUpdates.GPSLatitude = null
-      exifUpdates.GPSLatitudeRef = null
-      exifUpdates.GPSLongitude = null
-      exifUpdates.GPSLongitudeRef = null
-      exifUpdates.GPSPosition = null
+      updateData.latitude = null
+      updateData.longitude = null
+      for (const key of LOCATION_EXIF_KEYS) delete exif[key]
     }
   }
 
-  if (payload.rating !== undefined) {
-    exifUpdates.Rating = payload.rating !== null ? payload.rating : null
-  }
+  if (payload.rating !== undefined) exif.Rating = payload.rating
+  updateData.exif = exif as typeof photo.exif
 
-  const tempRoot = tmpdir()
-  await mkdir(tempRoot, { recursive: true })
-  const tempDir = await mkdtemp(path.join(tempRoot, 'cframe-edit-'))
-  const ext = path.extname(photo.storageKey) || '.jpg'
-  const tempFile = path.join(tempDir, `edited${ext}`)
+  await db
+    .update(tables.photos)
+    .set(updateData)
+    .where(eq(tables.photos.id, photoId))
 
-  try {
-    await writeFile(tempFile, originalBuffer)
+  const updatedPhoto = await db
+    .select()
+    .from(tables.photos)
+    .where(eq(tables.photos.id, photoId))
+    .get()
 
-    if (Object.keys(exifUpdates).length > 0) {
-      await exiftool.write(tempFile, exifUpdates, ['-overwrite_original'])
-    }
-
-    const updatedBuffer = await readFile(tempFile)
-    const prefix =
-      storageProvider.config && 'prefix' in storageProvider.config
-        ? storageProvider.config.prefix
-        : ''
-    await storageProvider.create(
-      photo.storageKey.replace(prefix || '', ''),
-      updatedBuffer,
-    )
-
-    const exifData = await extractExifData(updatedBuffer)
-
-    const updateData: Record<string, any> = {
-      exif: exifData,
-      fileSize: updatedBuffer.length,
-      lastModified: new Date().toISOString(),
-    }
-
-    if (normalizedTitle !== undefined) {
-      updateData.title = normalizedTitle || null
-    }
-
-    if (normalizedDescription !== undefined) {
-      updateData.description = normalizedDescription || null
-    }
-
-    if (normalizedTags !== undefined) {
-      updateData.tags = normalizedTags
-    }
-
-    if (payload.location !== undefined) {
-      if (payload.location) {
-        updateData.latitude = payload.location.latitude
-        updateData.longitude = payload.location.longitude
-        updateData.country = null
-        updateData.city = null
-        updateData.locationName = null
-        pendingReverseGeocode = {
-          latitude: payload.location.latitude,
-          longitude: payload.location.longitude,
-        }
-      } else {
-        updateData.latitude = null
-        updateData.longitude = null
-        updateData.country = null
-        updateData.city = null
-        updateData.locationName = null
-      }
-    }
-
-    await db
-      .update(tables.photos)
-      .set(updateData)
-      .where(eq(tables.photos.id, photoId))
-
-    const updatedPhoto = await db
-      .select()
-      .from(tables.photos)
-      .where(eq(tables.photos.id, photoId))
-      .get()
-
-    if (pendingReverseGeocode) {
-      const workerPool = globalThis.__workerPool
-      if (workerPool) {
-        try {
-          await workerPool.addTask(
-            {
-              type: 'photo-reverse-geocoding',
-              photoId,
-              latitude: pendingReverseGeocode.latitude,
-              longitude: pendingReverseGeocode.longitude,
-            },
-            {
-              priority: 1,
-            },
-          )
-        } catch (taskError) {
-          logger.location.warn(
-            `Failed to enqueue reverse geocoding for photo ${photoId}:`,
-            taskError,
-          )
-        }
-      } else {
-        logger.location.warn(
-          `Worker pool not initialized, skipping reverse geocoding enqueue for photo ${photoId}`,
-        )
-      }
-    }
-
-    return {
-      success: true,
-      photo: updatedPhoto,
-    }
-  } catch (error) {
-    logger.image.error('Failed to update photo metadata', error)
-    throw createError({
-      statusCode: 500,
-      statusMessage: t('dashboard.photos.messages.metadataUpdateFailed'),
-    })
-  } finally {
-    await rm(tempDir, { recursive: true, force: true })
+  return {
+    success: true,
+    photo: updatedPhoto
+      ? photoForClient(updatedPhoto, { includeSource: true })
+      : null,
+    binaryMetadataUpdated: false,
+    message:
+      'Metadata was updated in D1. The original Cloudflare Hosted Image binary is immutable in this Workers flow.',
   }
 })

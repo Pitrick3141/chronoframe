@@ -83,7 +83,14 @@ export interface FieldUIConfig {
  * 包含后端配置和前端 UI 信息
  * 由 API 返回给前端，前端可直接渲染
  */
-export interface FieldDescriptor extends SettingConfig {
+export interface FieldDescriptor extends Omit<
+  SettingConfig,
+  'defaultValue' | 'value'
+> {
+  value?: SettingValue
+  defaultValue?: SettingValue
+  /** Whether a redacted secret already has a configured value. */
+  hasValue?: boolean
   ui: FieldUIConfig
 }
 

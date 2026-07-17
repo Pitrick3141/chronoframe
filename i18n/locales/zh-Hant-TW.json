@@ -84,18 +84,18 @@
           "nativeShare": "使用系統分享",
           "copyLink": "複製連結",
           "copyImage": "複製圖片",
-          "downloadImage": "下載原圖",
+          "downloadImage": "下載展示圖",
           "generateShareImage": "產生分享圖片",
           "shareUrl": "分享連結",
           "downloadOgImage": "下載預覽圖",
-          "downloadOriginal": "下載原圖",
-          "downloadOriginalImage": "下載原圖"
+          "downloadOriginal": "下載展示圖",
+          "downloadOriginalImage": "下載展示圖"
         },
         "success": {
           "linkCopied": "連結已複製到剪貼簿",
           "imageCopied": "圖片已複製到剪貼簿",
           "ogImageDownloaded": "預覽圖下載成功",
-          "originalImageDownloaded": "原圖下載成功"
+          "originalImageDownloaded": "展示圖下載成功"
         },
         "error": {
           "copyNotSupported": "目前瀏覽器不支援複製功能",
@@ -103,7 +103,7 @@
           "nativeShareFailed": "原生分享失敗",
           "linkCopyFailed": "連結複製失敗",
           "ogImageDownloadFailed": "預覽圖下載失敗",
-          "originalImageDownloadFailed": "原圖下載失敗"
+          "originalImageDownloadFailed": "展示圖下載失敗"
         },
         "ogImage": {
           "title": "分享預覽圖",
@@ -487,7 +487,7 @@
       },
       "uploader": {
         "label": "拖曳或點擊選擇照片",
-        "description": "支援 JPEG、PNG、HEIC 格式的照片，以及 MOV 格式的原況照片影片。每個檔案的最大大小：{maxSize}MB"
+        "description": "JPEG、PNG 和 HEIC 圖片使用 Hosted Images（每個最大 {imageMaxSize} MiB）；MOV 原況照片影片使用 Cloudflare Stream（每個最大 {videoMaxSize} MiB）。"
       },
       "toolbar": {
         "title": "照片管理",
@@ -541,7 +541,7 @@
       "actions": {
         "reprocess": "重新處理",
         "refreshLocation": "重新取得城市",
-        "eraseLocationInfo": "抹除位置資訊",
+        "eraseLocationInfo": "清除 ChronoFrame 位置中繼資料",
         "delete": "刪除",
         "editMetadata": "編輯資訊",
         "previewPhoto": "照片預覽"
@@ -549,7 +549,7 @@
       "selection": {
         "selected": "已選擇 {count} / {total} 列",
         "batchReprocess": "批量重新處理",
-        "batchEraseLocation": "抹除位置資訊",
+        "batchEraseLocation": "清除 ChronoFrame 位置中繼資料",
         "batchDownload": "批量下載",
         "batchDelete": "批量刪除"
       },
@@ -558,8 +558,8 @@
         "description": "拖曳或選擇檔案。照片會自動處理並新增到圖庫。",
         "options": {
           "eraseLocation": {
-            "label": "上傳時抹除位置資訊",
-            "description": "本次上傳可覆蓋系統預設值，您可隨時切換開啟或關閉。"
+            "label": "上傳時清除 ChronoFrame 位置中繼資料",
+            "description": "只清除 ChronoFrame 儲存的 GPS 衍生欄位；Hosted Images 的原始來源檔不會被重寫，仍可能包含 EXIF GPS。"
           },
           "duplicateCheck": {
             "label": "重複檔案處理策略",
@@ -643,10 +643,10 @@
         "queueUnavailable": "任務佇列不可用",
         "reverseGeocodeQueued": "已新增重新取得城市的任務",
         "reverseGeocodeFailed": "重新取得城市任務新增失敗",
-        "eraseLocationQueued": "已新增抹除位置資訊任務",
-        "eraseLocationFailed": "抹除位置資訊任務新增失敗",
-        "batchEraseLocationQueued": "已新增 {count} 條抹除位置資訊任務",
-        "batchEraseLocationFailed": "批量抹除位置資訊任務新增失敗",
+        "eraseLocationQueued": "已新增清除 ChronoFrame 位置中繼資料任務",
+        "eraseLocationFailed": "位置中繼資料清除任務新增失敗",
+        "batchEraseLocationQueued": "已新增 {count} 條位置中繼資料清除任務",
+        "batchEraseLocationFailed": "批次位置中繼資料清除任務新增失敗",
         "taskSubmitFailed": "提交任務失敗",
         "taskStatusCheckFailed": "檢查任務狀態失敗",
         "uploadFailed": "上傳失敗"
@@ -655,11 +655,11 @@
         "noSelection": "請選擇照片進行上傳",
         "fileValidationFailed": "檔案驗證失敗",
         "allFilesValidationFailed": "所有檔案驗證失敗",
-        "allFilesTooLarge": "所選 {count} 個檔案皆超過最大大小限制（{maxSize}MB）。",
-        "filesTooLargeSkipped": "已略過 {count} 個過大檔案（上限 {maxSize}MB），其餘檔案將繼續上傳。",
+        "allFilesTooLarge": "所選 {count} 個檔案皆超過對應服務上限（Hosted Images：{imageMaxSize} MiB；Stream 影片：{videoMaxSize} MiB）。",
+        "filesTooLargeSkipped": "已略過 {count} 個過大檔案（Hosted Images：{imageMaxSize} MiB；Stream 影片：{videoMaxSize} MiB），其餘檔案將繼續上傳。",
         "filesUnsupportedSkipped": "已略過 {count} 個不支援格式的檔案，其餘檔案將繼續上傳。",
         "unsupportedFormat": "不支援的檔案格式：{type}。請選擇 JPEG、PNG 或 HEIC 照片，或 MOV 格式的原況照片影片。",
-        "fileTooLarge": "檔案過大：{size}MB。最大支援：{maxSize}MB。",
+        "fileTooLarge": "檔案過大：{size} MiB。最大支援：{maxSize} MiB。",
         "uploadFailed": "上傳失敗",
         "uploadNetworkError": "網路連線失敗或 CORS 錯誤。請檢查網路和儲存配置。",
         "uploadCorsError": "CORS 請求失敗。請檢查儲存 CORS 組態。",
@@ -869,6 +869,7 @@
             "opensuse": "openSUSE",
             "macos": "macOS",
             "docker": "Docker 容器",
+            "cloudflare-workers": "Cloudflare Workers",
             "unknown": "未知系統"
           }
         },
@@ -954,9 +955,13 @@
       "messages": {
         "noTasks": "沒有找到任務",
         "retrySuccess": "任務重試成功",
+        "retryPending": "任務已重新提交，仍在處理中",
         "retryFailed": "重試任務失敗",
         "deleteSuccess": "任務刪除成功",
         "batchRetrySuccess": "批次重試成功",
+        "batchRetryPending": "批次重試仍在處理中",
+        "batchRetryPartial": "批次重試部分失敗",
+        "batchRetryStatusDescription": "{completed} 個已完成，{pending} 個處理中，{failed} 個失敗",
         "clearSuccess": "清理完成",
         "operationFailed": "操作失敗",
         "clearSuccessDescription": "已清除 {count} 個任務",
@@ -1142,12 +1147,12 @@
     "privacy": {
       "upload": {
         "autoEraseLocation": {
-          "label": "上傳時自動抹除位置資訊",
-          "description": "在上傳與處理照片時自動抹除 EXIF GPS 資訊並清空地理位置欄位",
-          "help": "啟用後會將抹除位置資訊操作放入佇列非同步執行"
+          "label": "上傳時清除 ChronoFrame 位置中繼資料",
+          "description": "清除 D1 中儲存的 GPS 衍生 EXIF 值與地理位置欄位，不會重寫 Hosted Images 的原始來源檔。",
+          "help": "公開展示圖會重新編碼且不帶來源中繼資料；管理員下載來源檔時仍可能取得原有的 EXIF GPS。"
         }
       },
-      "sectionDescription": "管理相片上傳時的資料隱私策略。建議在公開站點啟用位置資訊抹除。"
+      "sectionDescription": "管理 ChronoFrame 對外展示的位置中繼資料。如需不可逆刪除來源檔 EXIF，請在上傳前完成清理。"
     },
     "storage": {
       "name": {
@@ -1266,7 +1271,45 @@
           "description": "用於訪問圖像的自訂 CDN URL"
         }
       },
-      "sectionDescription": "管理預設儲存方案與可用儲存提供者。此頁面的設定僅影響後續上傳檔案。",
+      "sectionDescription": "儲存由 Cloudflare 部署綁定提供，執行時僅能查看。",
+      "cloudflare": {
+        "title": "Cloudflare 儲存架構",
+        "description": "ChronoFrame 使用 Worker 部署時設定的 D1、Hosted Images、Stream 和 R2 綁定。",
+        "refresh": "更新健康狀態",
+        "status": {
+          "checking": "檢查中",
+          "healthy": "正常",
+          "degraded": "異常",
+          "missing": "未設定",
+          "unavailable": "無法使用"
+        },
+        "healthUnavailable": {
+          "title": "無法檢查儲存健康狀態",
+          "description": "下方架構仍然有效。請更新以重試綁定健康檢查。"
+        },
+        "readonly": {
+          "title": "由部署管理的設定",
+          "description": "無法在此變更儲存綁定或憑證。若要更換儲存資源，請更新 Worker 的 Cloudflare 綁定並重新部署。"
+        },
+        "bindings": {
+          "d1": {
+            "title": "D1 資料庫",
+            "description": "儲存使用者、設定、相簿、照片後設資料與處理狀態。"
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "儲存圖片資產並提供最佳化的傳遞變體。圖片預設上傳上限為 10 MiB。"
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "儲存並傳遞原況照片影片。basic 上傳必須小於 200 MB。"
+          },
+          "r2": {
+            "title": "R2 物件儲存",
+            "description": "儲存其他非圖片、非影片的二進位物件。"
+          }
+        }
+      },
       "table": {
         "columns": {
           "name": "儲存名稱",
@@ -1404,7 +1447,31 @@
     },
     "storage": {
       "title": "儲存設定",
-      "description": "選擇照片儲存位置"
+      "description": "查看為 ChronoFrame 預設的 Cloudflare 資源",
+      "cloudflare": {
+        "title": "Cloudflare 儲存綁定已設定",
+        "description": "持久性資料透過 Worker 部署時提供的綁定，分別寫入 D1、Hosted Images、Stream 和 R2。",
+        "configured": "已設定",
+        "noCredentials": "初始設定不需輸入儲存憑證。若要更換資源，請更新 Worker 綁定並重新部署。",
+        "bindings": {
+          "d1": {
+            "title": "D1 資料庫",
+            "description": "使用者、設定、相簿與照片後設資料"
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "原始圖片與最佳化的傳遞變體"
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "原況照片影片與最佳化的影片傳遞"
+          },
+          "r2": {
+            "title": "R2 物件儲存",
+            "description": "其他非圖片、非影片物件"
+          }
+        }
+      }
     },
     "map": {
       "title": "地圖服務",
@@ -1414,6 +1481,9 @@
       "title": "即將完成！",
       "description": "你的 ChronoFrame 畫廊已可使用。",
       "body": "你已完成所有基本設定。現在可使用管理員帳號登入並開始上傳照片。",
+      "bootstrapTokenLabel": "部署引導權杖",
+      "bootstrapTokenHelp": "建立首位管理員時必填。請輸入 Worker Secret CFRAME_BOOTSTRAP_TOKEN；ChronoFrame 只會傳送一次且不會儲存。已驗證管理員恢復設定時可留空。",
+      "bootstrapTokenPlaceholder": "至少 32 個字元",
       "goToDashboard": "前往儀表板",
       "setupFailedTitle": "設定失敗",
       "setupFailedDescription": "完成設定失敗"

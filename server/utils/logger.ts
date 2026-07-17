@@ -1,25 +1,4 @@
-import fs from 'fs'
-import path from 'path'
-import type { LogObject } from 'consola'
 import { createConsola } from 'consola'
-
-const logDir = path.join(process.cwd(), 'data', 'logs')
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true })
-}
-
-const logFilePath = path.join(logDir, 'app.log')
-
-const logFileReporter = {
-  log: (logObj: LogObject) => {
-    const logLine = `${JSON.stringify(logObj)}\n`
-    fs.appendFile(logFilePath, logLine, (err) => {
-      if (err) {
-        console.error('Failed to write log to file:', err)
-      }
-    })
-  },
-}
 
 const mConsola = createConsola({
   formatOptions: {
@@ -29,7 +8,8 @@ const mConsola = createConsola({
   },
 })
 
-mConsola.addReporter(logFileReporter)
+// Workers have no durable local filesystem. Console output is collected by
+// Cloudflare Workers Logs / Observability instead of being mirrored to a file.
 
 export const logger = {
   chrono: mConsola.withTag('cframe/main'),

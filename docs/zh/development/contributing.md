@@ -6,10 +6,10 @@
 
 ### 必需软件
 
-- **Node.js**: 20.0+
-- **pnpm**: 9.0+ （首选包管理器）
+- **Node.js**: 22.12+
+- **pnpm**: 10.0+ （首选包管理器）
 - **Git**: 最新版本
-- **Docker**: 可选，用于容器化开发
+- **Cloudflare 账号**: 本地 mock 可选，远端集成测试必需
 
 ## 克隆与安装
 
@@ -42,8 +42,13 @@ pnpm install
 ### 3. 配置环境变量
 
 ```bash
-# 复制环境变量模板
+# 按需复制公开配置
 cp .env.example .env
+
+# 本地运行时 secret 不进入 Git。复制示例，并为 NUXT_SESSION_PASSWORD 与
+# CFRAME_BOOTSTRAP_TOKEN 分别填写独立的、至少 32 字符的值。本地测试签名
+# 回调时，还需复制 Cloudflare 返回的 Stream webhook secret。
+cp .dev.vars.example .dev.vars
 
 # 编辑环境变量
 nano .env  # 或使用您喜欢的编辑器
@@ -52,23 +57,10 @@ nano .env  # 或使用您喜欢的编辑器
 #### 最小开发配置
 
 ```bash
-# === 管理员账户 ===
-CFRAME_ADMIN_EMAIL=dev@example.com
-CFRAME_ADMIN_NAME=Developer
-CFRAME_ADMIN_PASSWORD=dev123456
-
 # === 认证设置 ===
 NUXT_OAUTH_GITHUB_CLIENT_ID=your-dev-github-client-id
 NUXT_OAUTH_GITHUB_CLIENT_SECRET=your-dev-github-client-secret
-NUXT_SESSION_PASSWORD=your-32-character-development-key
-
-# === 存储设置（开发环境可使用 MinIO） ===
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=http://localhost:9000
-NUXT_PROVIDER_S3_BUCKET=chronoframe-dev
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=minioadmin
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=minioadmin
+# NUXT_SESSION_PASSWORD、CFRAME_BOOTSTRAP_TOKEN 与 CFRAME_STREAM_WEBHOOK_SECRET 应放在 .dev.vars，而不是此公开文件。
 
 # === 地图服务（可选） ===
 NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-development-token
@@ -136,33 +128,32 @@ chronoframe/
 
 #### 后端技术
 
-- **Nitro**: 服务端框架
-- **SQLite**: 轻量级数据库
+- **Cloudflare Workers / Nitro**: 边缘服务端运行时
+- **D1**: 兼容 SQLite 的 serverless 数据库
 - **Drizzle ORM**: 类型安全的 ORM
-- **Sharp**: 高性能图片处理
-- **ExifTool**: EXIF 数据提取
+- **Cloudflare Images**: Hosted Images 存储与图片转换
+- **Cloudflare Stream**: 视频直传、处理与 HLS 传输
+- **R2**: 其他非图片、非视频对象存储
 
 ## 开发流程
 
 ### 启动开发服务器
 
 ```bash
-# 启动完整开发服务器
-pnpm dev
-
-# 或分步启动
-pnpm build:deps           # 构建 WebGL 包
-pnpm dlx nuxi@latest dev  # 只启动 Nuxt 开发服务器
+# 生成 bindings、初始化本地 D1 并启动 Wrangler
+pnpm cf:typegen
+pnpm d1:migrate:local
+pnpm dev:worker
 ```
 
 ### 数据库操作
 
 ```bash
 # 生成迁移文件
-pnpm db:generate
+pnpm d1:generate
 
-# 执行数据库迁移
-pnpm db:migrate
+# 执行本地数据库迁移
+pnpm d1:migrate:local
 ```
 
 ### 构建项目
@@ -171,38 +162,25 @@ pnpm db:migrate
 # 构建 WebGL 依赖包
 pnpm build:deps
 
-# 构建完整项目
-pnpm build
+# 构建完整 Worker 项目
+pnpm build:worker
 
-# 预览生产构建
-pnpm preview
+# 在 Wrangler 本地运行时预览
+pnpm dev:worker
 ```
 
 ## 测试环境
 
-### 本地 MinIO 存储
+### 本地 Cloudflare Bindings
 
-使用 Docker 运行本地 MinIO 服务：
-
-```bash
-# 启动 MinIO
-docker run -d \
-  --name minio \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  -e "MINIO_ROOT_USER=minioadmin" \
-  -e "MINIO_ROOT_PASSWORD=minioadmin" \
-  minio/minio server /data --console-address ":9001"
-```
-
-访问 MinIO 控制台：http://localhost:9001
+`wrangler dev` 提供本地 D1、R2 与 Hosted Images binding 实现，本地数据与生产隔离。启动应用前先运行 `pnpm d1:migrate:local`。Stream Direct Creator Upload 与 HLS 播放需在连接账号的预览部署中验证；`.dev.vars` 中不应出现 Stream API Token。
 
 ### GitHub OAuth 应用
 
 1. 访问 GitHub Settings > Developer settings > OAuth Apps
 2. 创建新的 OAuth 应用
 3. 设置回调 URL：`http://localhost:3000/api/auth/github`
-4. 复制 Client ID 和 Client Secret 到 `.env` 文件
+4. Client ID 放入本地配置，Client Secret 放入 `.dev.vars`
 
 ### Mapbox 开发令牌
 

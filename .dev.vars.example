@@ -1,0 +1,21 @@
+# Copy this file to `.dev.vars` for `wrangler dev`.
+# Configure production values with `wrangler secret put <NAME>`.
+# Resource bindings DB, IMAGES, STREAM, MEDIA_BUCKET, and ASSETS are declared
+# in wrangler.jsonc and must not be represented as API credentials here.
+# Public upload-size defaults are documented in .env.example.
+
+# Required: independent high-entropy values of at least 32 characters. The
+# Worker refuses to start without them. Never reuse local values in production.
+NUXT_SESSION_PASSWORD=
+CFRAME_BOOTSTRAP_TOKEN=
+# Returned by the Cloudflare Stream webhook subscription API. The Worker uses
+# it to verify Webhook-Signature before touching D1.
+CFRAME_STREAM_WEBHOOK_SECRET=
+
+# Optional server-side integrations.
+NUXT_MAPBOX_ACCESS_TOKEN=
+NUXT_OAUTH_GITHUB_CLIENT_ID=
+NUXT_OAUTH_GITHUB_CLIENT_SECRET=
+
+# Non-secret server policy override for Cloudflare Stream.
+NUXT_CLOUDFLARE_STREAM_MAX_DURATION_SECONDS=600

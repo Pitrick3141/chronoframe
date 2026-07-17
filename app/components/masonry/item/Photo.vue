@@ -26,20 +26,41 @@ const containerWidth = ref(0)
 const isHovering = ref(false)
 const isVideoPlaying = ref(false)
 const isVideoLoaded = ref(false)
-const videoBlob = ref<Blob | null>(null)
-const videoBlobUrl = ref<string | null>(null)
-const { convertMovToMp4, getProcessingState } = useLivePhotoProcessor()
+const { prepareLivePhoto, getProcessingState } = useLivePhotoProcessor()
+const {
+  attachStreamVideo,
+  detachStreamVideo,
+  isLoading: isStreamVideoLoading,
+  isReady: isStreamVideoReady,
+} = useStreamVideo()
 
 const isTouching = ref(false)
 const touchCount = ref(0)
-const longPressTimer = ref<NodeJS.Timeout | null>(null)
+const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const hideVideoTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const retryPlayTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const initialTouchPos = ref<{ x: number; y: number } | null>(null)
 const isMobile = useMediaQuery('(max-width: 768px)')
 
 const resizeObserverRef = ref<ResizeObserver | null>(null)
 const intersectionObserverRef = ref<IntersectionObserver | null>(null)
+let streamAttachmentId = 0
+let pendingStreamRequest: { url: string; attachmentId: number } | null = null
 
-const processingState = getProcessingState(props.photo.id)
+const preparationState = getProcessingState(props.photo.id)
+const processingState = computed(() => {
+  if (isStreamVideoLoading.value) {
+    return {
+      isProcessing: true,
+      progress: 80,
+    }
+  }
+  return preparationState.value
+})
+
+watch(isStreamVideoReady, (ready) => {
+  isVideoLoaded.value = ready
+})
 
 const aspectRatio = computed(() => {
   // Priority 1: Use aspectRatio from photo data if available
@@ -92,7 +113,7 @@ const handleMouseEnter = async () => {
   if (!props.photo.isLivePhoto || !props.photo.livePhotoVideoUrl) return
 
   // 如果视频已准备好，立即播放
-  if (videoBlob.value && videoBlobUrl.value && isVideoLoaded.value) {
+  if (isVideoLoaded.value) {
     playLivePhotoVideo()
   } else if (!processingState.value?.isProcessing) {
     // 如果视频还未处理，立即开始处理
@@ -111,21 +132,18 @@ const handleMouseLeave = () => {
   }
 
   // Use a slight delay for smoother transition when mouse leaves
-  setTimeout(() => {
+  if (hideVideoTimer.value) clearTimeout(hideVideoTimer.value)
+  hideVideoTimer.value = setTimeout(() => {
     if (!isHovering.value && !isTouching.value) {
       // Also check touching state
       isVideoPlaying.value = false
     }
+    hideVideoTimer.value = null
   }, 150)
 }
 
 const playLivePhotoVideo = () => {
-  if (!videoRef.value || !videoBlobUrl.value) return
-
-  // 预加载视频以确保流畅播放
-  if (videoRef.value.readyState < 2) {
-    videoRef.value.load()
-  }
+  if (!videoRef.value || !isVideoLoaded.value) return
 
   // 确保视频从头开始播放
   videoRef.value.currentTime = 0
@@ -165,8 +183,8 @@ const playLivePhotoVideo = () => {
           if (error.name === 'NotAllowedError') {
             console.log('Video play blocked by browser policy, retrying...')
             if (videoRef.value) {
-              videoRef.value.load()
-              setTimeout(() => {
+              if (retryPlayTimer.value) clearTimeout(retryPlayTimer.value)
+              retryPlayTimer.value = setTimeout(() => {
                 if (videoRef.value && isVideoPlaying.value) {
                   const retryPromise = videoRef.value.play()
                   if (retryPromise !== undefined) {
@@ -175,6 +193,7 @@ const playLivePhotoVideo = () => {
                     })
                   }
                 }
+                retryPlayTimer.value = null
               }, 100)
             }
           }
@@ -190,14 +209,29 @@ const handleVideoEnded = () => {
   }
 
   // Add a small delay before hiding video to make the transition smoother
-  setTimeout(() => {
+  if (hideVideoTimer.value) clearTimeout(hideVideoTimer.value)
+  hideVideoTimer.value = setTimeout(() => {
     isVideoPlaying.value = false
+    hideVideoTimer.value = null
   }, 100)
 }
 
 // Mobile touch handlers for LivePhoto
 const handleTouchStart = (event: TouchEvent) => {
-  if (!isMobile.value || !props.photo.isLivePhoto || !videoBlobUrl.value) return
+  if (
+    !isMobile.value ||
+    !props.photo.isLivePhoto ||
+    !props.photo.livePhotoVideoUrl
+  )
+    return
+
+  if (
+    !isVideoLoaded.value &&
+    !isStreamVideoLoading.value &&
+    !processingState.value?.isProcessing
+  ) {
+    void processLivePhotoWhenVisible()
+  }
 
   touchCount.value = event.touches.length
 
@@ -275,10 +309,12 @@ const cancelLivePhotoTouch = () => {
   }
 
   // Use a slight delay for smoother transition
-  setTimeout(() => {
+  if (hideVideoTimer.value) clearTimeout(hideVideoTimer.value)
+  hideVideoTimer.value = setTimeout(() => {
     if (!isTouching.value && !isHovering.value) {
       isVideoPlaying.value = false
     }
+    hideVideoTimer.value = null
   }, 150)
 }
 
@@ -305,37 +341,47 @@ const handleClick = (event: Event) => {
 
 // 智能LivePhoto处理：基于可见性和用户行为
 const processLivePhotoWhenVisible = async () => {
+  const requestedStreamUrl = props.photo.livePhotoVideoUrl
   if (
     !props.photo.isLivePhoto ||
-    !props.photo.livePhotoVideoUrl ||
-    !isVisible.value
+    !requestedStreamUrl ||
+    !isVisible.value ||
+    isStreamVideoLoading.value ||
+    processingState.value?.isProcessing
   )
     return
 
+  if (pendingStreamRequest?.url === requestedStreamUrl) return
+  const attachmentId = ++streamAttachmentId
+  const streamRequest = { url: requestedStreamUrl, attachmentId }
+  pendingStreamRequest = streamRequest
+
   try {
-    // 使用优化的转换函数，支持重试和缓存
-    const blob = await convertMovToMp4(
-      props.photo.livePhotoVideoUrl,
-      props.photo.id,
-    )
+    const streamUrl = await prepareLivePhoto(requestedStreamUrl, props.photo.id)
 
-    if (blob) {
-      videoBlob.value = blob
-      // Clean up previous blob URL
-      if (videoBlobUrl.value) {
-        URL.revokeObjectURL(videoBlobUrl.value)
-      }
-      videoBlobUrl.value = URL.createObjectURL(blob)
-      isVideoLoaded.value = true
+    await nextTick()
+    if (
+      streamUrl &&
+      attachmentId === streamAttachmentId &&
+      streamUrl === props.photo.livePhotoVideoUrl &&
+      videoRef.value
+    ) {
+      const ready = await attachStreamVideo(
+        videoRef.value as HTMLVideoElement,
+        streamUrl,
+      )
+      if (attachmentId !== streamAttachmentId) return
 
-      // 预热视频元素以提高播放性能
-      if (videoRef.value) {
-        videoRef.value.load()
+      isVideoLoaded.value = ready
+      if (ready && (isHovering.value || isTouching.value)) {
+        playLivePhotoVideo()
       }
     }
   } catch (error) {
     console.error('Failed to process LivePhoto:', error)
     // 错误状态会通过processingState反映出来
+  } finally {
+    if (pendingStreamRequest === streamRequest) pendingStreamRequest = null
   }
 }
 
@@ -383,6 +429,18 @@ const formatExposureTime = (
     return `1/${denominator}`
   }
 }
+
+watch(
+  () => props.photo.livePhotoVideoUrl,
+  () => {
+    streamAttachmentId++
+    pendingStreamRequest = null
+    isVideoLoaded.value = false
+    isVideoPlaying.value = false
+    detachStreamVideo()
+    if (isVisible.value) void nextTick(processLivePhotoWhenVisible)
+  },
+)
 
 // Preload image on mount to get dimensions
 onMounted(() => {
@@ -439,6 +497,14 @@ onMounted(() => {
                 nextTick(() => {
                   processLivePhotoWhenVisible()
                 })
+              } else {
+                // Do not keep an hls.js MediaSource, network loader, and media
+                // buffer alive for every item the user has scrolled past.
+                streamAttachmentId++
+                pendingStreamRequest = null
+                isVideoLoaded.value = false
+                isVideoPlaying.value = false
+                detachStreamVideo()
               }
             }
           })
@@ -457,6 +523,8 @@ onMounted(() => {
 
 // Cleanup observers on unmount
 onUnmounted(() => {
+  streamAttachmentId++
+  pendingStreamRequest = null
   if (resizeObserverRef.value) {
     resizeObserverRef.value.disconnect()
   }
@@ -469,11 +537,15 @@ onUnmounted(() => {
     clearTimeout(longPressTimer.value)
     longPressTimer.value = null
   }
-
-  // Clean up video blob URL
-  if (videoBlobUrl.value) {
-    URL.revokeObjectURL(videoBlobUrl.value)
+  if (hideVideoTimer.value) {
+    clearTimeout(hideVideoTimer.value)
+    hideVideoTimer.value = null
   }
+  if (retryPlayTimer.value) {
+    clearTimeout(retryPlayTimer.value)
+    retryPlayTimer.value = null
+  }
+  detachStreamVideo()
 })
 </script>
 
@@ -510,9 +582,8 @@ onUnmounted(() => {
 
         <!-- LivePhoto video with enhanced motion transition -->
         <motion.video
-          v-if="photo.isLivePhoto && videoBlobUrl"
+          v-if="photo.isLivePhoto && photo.livePhotoVideoUrl"
           ref="videoRef"
-          :src="videoBlobUrl"
           class="absolute inset-0 w-full h-full object-cover"
           :class="{ 'select-none pointer-events-none': isVideoPlaying }"
           muted
@@ -534,15 +605,6 @@ onUnmounted(() => {
             delay: isVideoPlaying ? 0.05 : 0,
           }"
           @ended="handleVideoEnded"
-          @loadeddata="
-            () => {
-              // 视频加载完成后预热
-              if (videoRef && !isVideoPlaying) {
-                videoRef.currentTime = 0.1
-                videoRef.pause()
-              }
-            }
-          "
         />
       </div>
 
@@ -688,5 +750,4 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
-
 <style scoped></style>

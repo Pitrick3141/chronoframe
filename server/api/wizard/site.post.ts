@@ -2,6 +2,14 @@ import { z } from 'zod'
 import { settingsManager } from '~~/server/services/settings/settingsManager'
 
 export default eventHandler(async (event) => {
+  const session = await requireUserSession(event)
+  if (!session.user.isAdmin) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Admin privileges required',
+    })
+  }
+
   const body = await readValidatedBody(
     event,
     z.object({

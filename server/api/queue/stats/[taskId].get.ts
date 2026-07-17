@@ -1,38 +1,49 @@
-import z from 'zod'
+import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+
+import {
+  finalizeExistingQueueTask,
+  type WorkersPipelinePayload,
+} from '~~/server/services/cloudflare/finalize-upload'
 
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
-  try {
-    const { taskId } = await getValidatedRouterParams(
-      event,
-      z.object({
-        taskId: z.string().nonempty(),
-      }).parse,
-    )
+  const { taskId } = await getValidatedRouterParams(
+    event,
+    z.object({ taskId: z.coerce.number().int().positive() }).parse,
+  )
 
-    const workerPool = globalThis.__workerPool
-    if (!workerPool) {
-      throw createError({
-        statusCode: 503,
-        statusMessage: 'Worker pool not initialized',
-      })
-    }
+  const db = useDB()
+  let task = await db
+    .select()
+    .from(tables.pipelineQueue)
+    .where(eq(tables.pipelineQueue.id, taskId))
+    .get()
 
-    const taskStats = await workerPool.getTaskStatus(Number(taskId))
-    if (!taskStats) {
-      throw createError({
-        statusCode: 404,
-        statusMessage: 'Task not found',
-      })
-    }
-
-    return taskStats
-  } catch (error) {
+  if (!task) {
     throw createError({
-      statusCode: 500,
-      statusMessage:
-        error instanceof Error ? error.message : 'Failed to get queue status',
+      statusCode: 404,
+      statusMessage: 'Task not found',
     })
   }
+
+  const payload = task.payload as WorkersPipelinePayload
+  if (
+    (task.status === 'pending' || task.status === 'in-stages') &&
+    (payload.type === 'photo' || payload.type === 'live-photo-video')
+  ) {
+    // Workers do not keep a background poller alive. Photo finalization may
+    // discover an embedded Motion Photo, so both task kinds refresh Stream
+    // lazily while an authenticated client is polling.
+    await finalizeExistingQueueTask(taskId, payload)
+    task =
+      (await db
+        .select()
+        .from(tables.pipelineQueue)
+        .where(eq(tables.pipelineQueue.id, taskId))
+        .get()) ?? task
+  }
+
+  return task
 })

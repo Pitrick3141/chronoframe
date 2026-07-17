@@ -4,6 +4,54 @@ import type { TableColumn } from '@nuxt/ui'
 
 const UButton = resolveComponent('UButton')
 
+type QueueTaskStatus = 'pending' | 'in-stages' | 'completed' | 'failed'
+
+interface QueueTaskRecord {
+  id: number
+  payload: {
+    type:
+      | 'photo'
+      | 'live-photo-video'
+      | 'photo-reverse-geocoding'
+      | 'photo-erase-location'
+    [key: string]: unknown
+  }
+  priority: number
+  attempts: number
+  maxAttempts: number
+  status: QueueTaskStatus
+  statusStage: string | null
+  errorMessage: string | null
+  createdAt: string | Date
+  completedAt: string | Date | null
+}
+
+interface QueueListResponse {
+  success: boolean
+  data: QueueTaskRecord[]
+}
+
+interface RetryTaskResponse {
+  success: boolean
+  taskId: number
+  status: Exclude<QueueTaskStatus, 'pending'>
+  message: string
+  warning?: string
+  error?: string
+}
+
+interface RetryBatchResponse {
+  success: boolean
+  message: string
+  retriedCount: number
+  completedCount: number
+  pendingCount: number
+  failedCount: number
+  skippedCount: number
+  hasMore: boolean
+  nextCursor?: number
+}
+
 definePageMeta({
   layout: 'dashboard',
 })
@@ -21,15 +69,108 @@ const statusFilter = ref<string>('all')
 const typeFilter = ref<string>('all')
 
 // 数据获取
-const { data: queueData, refresh: refreshQueue } = await useFetch(
-  '/api/queue/task/list',
-  {
+const { data: queueData, refresh: refreshQueue } =
+  await useFetch<QueueListResponse>('/api/queue/task/list', {
     query: computed(() => ({
       ...(statusFilter.value !== 'all' && { status: statusFilter.value }),
       ...(typeFilter.value !== 'all' && { type: typeFilter.value }),
     })),
-  },
-)
+  })
+
+const RECONCILE_BASE_DELAY_MS = 2_000
+const RECONCILE_MAX_DELAY_MS = 30_000
+const RECONCILE_MAX_ROUNDS = 15
+const RECONCILE_TASKS_PER_ROUND = 12
+
+let reconciliationTimer: ReturnType<typeof setTimeout> | null = null
+let passiveRefreshTimer: ReturnType<typeof setInterval> | null = null
+let reconciliationGeneration = 0
+let reconciliationRound = 0
+let reconciliationCursor = 0
+
+const stopActiveTaskReconciliation = () => {
+  reconciliationGeneration++
+  if (reconciliationTimer) {
+    clearTimeout(reconciliationTimer)
+    reconciliationTimer = null
+  }
+}
+
+const scheduleActiveTaskReconciliation = (generation: number) => {
+  if (
+    generation !== reconciliationGeneration ||
+    reconciliationRound >= RECONCILE_MAX_ROUNDS
+  ) {
+    return
+  }
+
+  const delay = Math.min(
+    RECONCILE_MAX_DELAY_MS,
+    RECONCILE_BASE_DELAY_MS * 2 ** Math.max(0, reconciliationRound - 1),
+  )
+  reconciliationTimer = setTimeout(() => {
+    reconciliationTimer = null
+    void reconcileActiveTasks(generation)
+  }, delay)
+}
+
+const reconcileActiveTasks = async (generation: number) => {
+  if (generation !== reconciliationGeneration) return
+
+  reconciliationRound++
+  try {
+    // Always inspect the unfiltered ledger so changing the visible table filter
+    // cannot strand a Stream task in `in-stages`.
+    const ledger = await $fetch<QueueListResponse>('/api/queue/task/list')
+    if (generation !== reconciliationGeneration) return
+
+    const activeTasks = ledger.data.filter(
+      (task) =>
+        (task.status === 'pending' || task.status === 'in-stages') &&
+        (task.payload.type === 'photo' ||
+          task.payload.type === 'live-photo-video'),
+    )
+    if (activeTasks.length === 0) {
+      await refreshQueue()
+      return
+    }
+
+    const start = reconciliationCursor % activeTasks.length
+    const rotatedTasks = [
+      ...activeTasks.slice(start),
+      ...activeTasks.slice(0, start),
+    ]
+    const tasksThisRound = rotatedTasks.slice(0, RECONCILE_TASKS_PER_ROUND)
+    reconciliationCursor = (start + tasksThisRound.length) % activeTasks.length
+
+    // Keep the requests sequential. One transient failure is isolated to that
+    // task and later rounds continue instead of turning it into a UI failure.
+    for (const task of tasksThisRound) {
+      if (generation !== reconciliationGeneration) return
+      try {
+        await $fetch(`/api/queue/stats/${task.id}`)
+      } catch (error) {
+        console.warn(`Failed to reconcile queue task ${task.id}:`, error)
+      }
+    }
+
+    if (generation !== reconciliationGeneration) return
+    await refreshQueue()
+  } catch (error) {
+    // The bounded next round retries a failed list request with backoff.
+    console.warn('Failed to reconcile active queue tasks:', error)
+  }
+
+  scheduleActiveTaskReconciliation(generation)
+}
+
+const startActiveTaskReconciliation = () => {
+  stopActiveTaskReconciliation()
+  reconciliationRound = 0
+  reconciliationCursor = 0
+  const generation = reconciliationGeneration
+  void reconcileActiveTasks(generation)
+}
 
 // 队列统计数据
 const queueStats = computed(() => {
@@ -52,6 +193,7 @@ const refreshData = async () => {
   try {
     await refreshQueue()
     selectedTasks.value = []
+    startActiveTaskReconciliation()
   } finally {
     isLoading.value = false
   }
@@ -71,7 +213,9 @@ const clearNonActiveTasks = async () => {
 
     toast.add({
       title: $t('dashboard.queue.messages.clearSuccess'),
-      description: $t('dashboard.queue.messages.clearSuccessDescription', { count: result.deletedCount }),
+      description: $t('dashboard.queue.messages.clearSuccessDescription', {
+        count: result.deletedCount,
+      }),
       color: 'success',
     })
 
@@ -91,15 +235,33 @@ const clearNonActiveTasks = async () => {
 // 重试单个任务
 const retryTask = async (taskId: number) => {
   try {
-    await $fetch('/api/queue/task/retry', {
+    const result = await $fetch<RetryTaskResponse>('/api/queue/task/retry', {
       method: 'POST',
       body: { taskId },
     })
 
-    toast.add({
-      title: $t('dashboard.queue.messages.retrySuccess'),
-      color: 'success',
-    })
+    if (result.status === 'completed') {
+      toast.add({
+        title: $t('dashboard.queue.messages.retrySuccess'),
+        description: result.warning,
+        color: 'success',
+      })
+    } else if (result.status === 'in-stages') {
+      toast.add({
+        title: $t('dashboard.queue.messages.retryPending'),
+        description: result.warning,
+        color: 'info',
+      })
+    } else {
+      toast.add({
+        title: $t('dashboard.queue.messages.operationFailed'),
+        description:
+          result.error ||
+          result.message ||
+          $t('dashboard.queue.messages.retryFailed'),
+        color: 'error',
+      })
+    }
 
     await refreshData()
   } catch (error: any) {
@@ -116,23 +278,95 @@ const retryTask = async (taskId: number) => {
 const retryAllFailedTasks = async () => {
   try {
     isLoading.value = true
-    const result = await $fetch('/api/queue/task/retry-batch', {
-      method: 'POST',
-      body: { retryAll: true },
-    })
+    const result: RetryBatchResponse = {
+      success: true,
+      message: '',
+      retriedCount: 0,
+      completedCount: 0,
+      pendingCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      hasMore: false,
+    }
+    const seenCursors = new Set<number>()
+    let cursor: number | undefined
 
-    toast.add({
-      title: $t('dashboard.queue.messages.batchRetrySuccess'),
-      description: $t('dashboard.queue.messages.batchRetrySuccessDescription', { count: result.retriedCount }),
-      color: 'success',
-    })
+    do {
+      const page = await $fetch<RetryBatchResponse>(
+        '/api/queue/task/retry-batch',
+        {
+          method: 'POST',
+          body: {
+            retryAll: true,
+            ...(cursor === undefined ? {} : { cursor }),
+          },
+        },
+      )
+
+      result.success &&= page.success
+      result.message = page.message
+      result.retriedCount += page.retriedCount
+      result.completedCount += page.completedCount
+      result.pendingCount += page.pendingCount
+      result.failedCount += page.failedCount
+      result.skippedCount += page.skippedCount
+      result.hasMore = page.hasMore
+
+      if (!page.hasMore) break
+      if (page.nextCursor === undefined || seenCursors.has(page.nextCursor)) {
+        throw new Error('Batch retry cursor did not advance')
+      }
+      seenCursors.add(page.nextCursor)
+      cursor = page.nextCursor
+    } while (result.hasMore)
+
+    if (result.failedCount > 0) {
+      toast.add({
+        title: $t('dashboard.queue.messages.batchRetryPartial'),
+        description: $t(
+          'dashboard.queue.messages.batchRetryStatusDescription',
+          {
+            completed: result.completedCount,
+            pending: result.pendingCount,
+            failed: result.failedCount,
+          },
+        ),
+        color:
+          result.completedCount > 0 || result.pendingCount > 0
+            ? 'warning'
+            : 'error',
+      })
+    } else if (result.pendingCount > 0) {
+      toast.add({
+        title: $t('dashboard.queue.messages.batchRetryPending'),
+        description: $t(
+          'dashboard.queue.messages.batchRetryStatusDescription',
+          {
+            completed: result.completedCount,
+            pending: result.pendingCount,
+            failed: result.failedCount,
+          },
+        ),
+        color: 'info',
+      })
+    } else {
+      toast.add({
+        title: $t('dashboard.queue.messages.batchRetrySuccess'),
+        description: $t(
+          'dashboard.queue.messages.batchRetrySuccessDescription',
+          { count: result.completedCount },
+        ),
+        color: 'success',
+      })
+    }
 
     await refreshData()
   } catch (error: any) {
     console.error('Batch retry failed:', error)
     toast.add({
       title: $t('dashboard.queue.messages.operationFailed'),
-      description: error?.message || $t('dashboard.queue.messages.batchRetryFailed'),
+      description:
+        error?.message || $t('dashboard.queue.messages.batchRetryFailed'),
       color: 'error',
     })
   } finally {
@@ -157,7 +391,8 @@ const deleteTask = async (taskId: number) => {
     console.error('Delete task failed:', error)
     toast.add({
       title: $t('dashboard.queue.messages.operationFailed'),
-      description: error?.message || $t('dashboard.queue.messages.deleteFailed'),
+      description:
+        error?.message || $t('dashboard.queue.messages.deleteFailed'),
       color: 'error',
     })
   }
@@ -268,10 +503,21 @@ const columns = computed<TableColumn<any>[]>(() => [
   },
 ])
 
-// 自动刷新
-const refreshInterval = setInterval(refreshData, 10000) // 每10秒刷新一次
+onMounted(() => {
+  startActiveTaskReconciliation()
+  // Keep the ledger view fresh for tasks created in another tab without
+  // turning the bounded status reconciliation into an endless poller.
+  passiveRefreshTimer = setInterval(() => {
+    void refreshQueue()
+  }, 30_000)
+})
+
 onBeforeUnmount(() => {
-  clearInterval(refreshInterval)
+  stopActiveTaskReconciliation()
+  if (passiveRefreshTimer) {
+    clearInterval(passiveRefreshTimer)
+    passiveRefreshTimer = null
+  }
 })
 </script>
 
@@ -344,7 +590,9 @@ onBeforeUnmount(() => {
         <UCard>
           <template #header>
             <div class="flex items-center justify-between pb-2">
-              <h2 class="text-lg font-semibold">{{ $t('dashboard.queue.taskListTitle') }}</h2>
+              <h2 class="text-lg font-semibold">
+                {{ $t('dashboard.queue.taskListTitle') }}
+              </h2>
               <div class="flex items-center gap-2">
                 <USelectMenu
                   v-model="statusFilter"
@@ -476,7 +724,9 @@ onBeforeUnmount(() => {
                     <!-- 任务ID和类型 -->
                     <div class="flex gap-4">
                       <div>
-                        <p class="text-xs text-neutral-500">{{ $t('dashboard.queue.table.detail.photoId') }}</p>
+                        <p class="text-xs text-neutral-500">
+                          {{ $t('dashboard.queue.table.detail.photoId') }}
+                        </p>
                         <p class="text-sm capitalize">
                           {{ row.original.payload.photoId || '-' }}
                         </p>
@@ -524,7 +774,9 @@ onBeforeUnmount(() => {
                       v-if="row.original.payload"
                       class="mt-3"
                     >
-                      <p class="text-xs text-gray-500 mb-1">{{ $t('dashboard.queue.table.detail.payload') }}</p>
+                      <p class="text-xs text-gray-500 mb-1">
+                        {{ $t('dashboard.queue.table.detail.payload') }}
+                      </p>
                       <pre
                         class="text-xs bg-neutral-100/50 dark:bg-neutral-800/50 p-2 rounded overflow-x-auto text-neutral-700 dark:text-neutral-300"
                         >{{

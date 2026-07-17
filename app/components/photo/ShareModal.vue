@@ -263,15 +263,34 @@ const downloadOgImage = async () => {
   }
 }
 
-const downloadOriginalImage = async () => {
+const downloadDisplayImage = async () => {
   try {
     const response = await fetch(props.photo.originalUrl!)
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status})`)
+    }
     const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    const extension = props.photo.originalUrl!.split('.').pop() || 'jpg'
-    link.download = `${props.photo.title || 'photo'}.${extension}`
+    const displayFilename = props.photo.displayFilename?.trim()
+    const fallbackName = props.photo.title?.trim() || `photo-${props.photo.id}`
+    const leafName = (displayFilename || fallbackName).split(/[\\/]/).pop()!
+    const safeName = leafName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    const extensionByType: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/heic': 'heic',
+      'image/heif': 'heif',
+      'image/svg+xml': 'svg',
+    }
+    const extension = extensionByType[blob.type]
+    link.download =
+      /\.[a-z0-9]{1,10}$/i.test(safeName) || !extension
+        ? safeName
+        : `${safeName}.${extension}`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -281,7 +300,7 @@ const downloadOriginalImage = async () => {
     gtag('event', 'photo_download', {
       photo_id: props.photo.id,
       photo_title: props.photo.title || 'Untitled',
-      download_type: 'original',
+      download_type: 'display',
     })
 
     toast.add({
@@ -435,7 +454,7 @@ defineShortcuts({
                 color="info"
                 variant="soft"
                 icon="tabler:download"
-                @click="downloadOriginalImage"
+                @click="downloadDisplayImage"
               >
                 {{ $t('ui.action.share.actions.downloadOriginalImage') }}
               </UButton>

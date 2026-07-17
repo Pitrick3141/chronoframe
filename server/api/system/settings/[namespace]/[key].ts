@@ -16,6 +16,8 @@ export default eventHandler(async (event) => {
   )
 
   if (event.method === 'GET') {
+    await requireAdminSession(event)
+
     try {
       const value = await settingsManager.get(namespace, key)
       return { namespace, key, value }
@@ -28,13 +30,7 @@ export default eventHandler(async (event) => {
   }
 
   if (event.method === 'PUT') {
-    const session = await requireUserSession(event)
-    if (!session || !session.user.isAdmin) {
-      throw createError({
-        statusCode: 403,
-        statusMessage: 'Admin privileges required',
-      })
-    }
+    const session = await requireAdminSession(event)
 
     const { value } = await readValidatedBody(
       event,
@@ -46,7 +42,7 @@ export default eventHandler(async (event) => {
     // 获取当前用户ID，如果用户不存在于数据库则返回null
     const db = useDB()
     const currentUser = session.user.id
-      ? db
+      ? await db
           .select()
           .from(tables.users)
           .where(eq(tables.users.id, session.user.id))

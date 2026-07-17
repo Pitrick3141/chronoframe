@@ -7,13 +7,13 @@ definePageMeta({
 
 const router = useRouter()
 
-// Use wizard form for 'app' namespace (site settings)
+// The public wizard uses a narrow "site" alias for the internal "app" settings.
 const {
   fields,
   state,
   loading: fetchingSchema,
   isFieldVisible,
-} = useWizardForm('app')
+} = useWizardForm('site')
 
 const schema = z.object({
   title: z.string().min(1, 'Title is required'),

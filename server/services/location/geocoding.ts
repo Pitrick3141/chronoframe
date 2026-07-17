@@ -13,6 +13,42 @@ export interface GeocodingProvider {
   reverseGeocode(lat: number, lon: number): Promise<LocationInfo | null>
 }
 
+interface MapboxContextEntry {
+  name?: string
+}
+
+interface MapboxResponse {
+  features?: Array<{
+    properties?: {
+      context?: {
+        country?: MapboxContextEntry
+        locality?: MapboxContextEntry
+        place?: MapboxContextEntry
+        district?: MapboxContextEntry
+        region?: MapboxContextEntry
+      }
+      place_formatted?: string
+      name?: string
+    }
+  }>
+}
+
+interface NominatimResponse {
+  error?: string
+  address?: {
+    country?: string
+    country_code?: string
+    district?: string
+    city?: string
+    town?: string
+    county?: string
+    state?: string
+    village?: string
+    hamlet?: string
+  }
+  display_name?: string
+}
+
 /**
  * Mapbox 地理编码提供者
  * 高精度商业地理编码服务，支持全球范围和多语言
@@ -63,15 +99,15 @@ export class MapboxGeocodingProvider implements GeocodingProvider {
             )
           }
 
-          const data = await response.json()
+          const data = (await response.json()) as MapboxResponse
 
-          if (!data || !data.features || data.features.length === 0) {
+          const feature = data.features?.[0]
+          if (!feature) {
             logger.location.warn('Mapbox API returned no features')
             return null
           }
 
           // 取第一个最相关的结果
-          const feature = data.features[0]
           const properties = feature.properties || {}
           const context = properties.context || {}
 
@@ -173,7 +209,7 @@ export class NominatimGeocodingProvider implements GeocodingProvider {
             )
           }
 
-          const data = await response.json()
+          const data = (await response.json()) as NominatimResponse
 
           if (!data || data.error) {
             throw new Error(`Nominatim API returned error: ${data?.error}`)

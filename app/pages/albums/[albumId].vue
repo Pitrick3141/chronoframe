@@ -84,6 +84,13 @@ const masonryItems = computed(() => {
   )
 })
 
+const masonryKeyMapper = (
+  _item: unknown,
+  _column: number,
+  _row: number,
+  index: number,
+) => masonryItems.value[index]?.originalIndex ?? index
+
 const isMobile = useMediaQuery('(max-width: 768px)')
 const columnWidth = computed(() => (isMobile.value ? 280 : 280))
 const maxColumns = computed(() => (isMobile.value ? 2 : 8))
@@ -255,7 +262,13 @@ onBeforeMount(() => {
                 <!-- Created -->
                 <div
                   class="flex items-center gap-1"
-                  :title="$t('album.createdTooltip', { date: $dayjs(albumData.createdAt).format('YYYY-MM-DD HH:mm:ss') })"
+                  :title="
+                    $t('album.createdTooltip', {
+                      date: $dayjs(albumData.createdAt).format(
+                        'YYYY-MM-DD HH:mm:ss',
+                      ),
+                    })
+                  "
                 >
                   <Icon
                     name="tabler:clock-plus"
@@ -306,10 +319,7 @@ onBeforeMount(() => {
             :min-columns="minColumns"
             :max-columns="maxColumns"
             :ssr-columns="2"
-            :key-mapper="
-              (_item, _column, _row, index) =>
-                masonryItems[index]?.originalIndex ?? index
-            "
+            :key-mapper="masonryKeyMapper"
           >
             <template #default="{ item }">
               <MasonryItem

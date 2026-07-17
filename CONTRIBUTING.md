@@ -6,7 +6,7 @@
 
 ### Required Software
 
-- **Node.js**: 20.0+
+- **Node.js**: 22.12+
 - **pnpm**: 9.0+ (preferred package manager)
 - **Git**: Latest version
 - **Docker**: Optional, for containerized development
@@ -44,6 +44,7 @@ pnpm install
 ```bash
 # Copy environment variable template
 cp .env.example .env
+cp .dev.vars.example .dev.vars
 
 # Edit environment variables
 nano .env  # Or use your preferred editor
@@ -52,23 +53,13 @@ nano .env  # Or use your preferred editor
 #### Minimal Development Configuration
 
 ```bash
-# === Admin Account ===
-CFRAME_ADMIN_EMAIL=dev@example.com
-CFRAME_ADMIN_NAME=Developer
-CFRAME_ADMIN_PASSWORD=dev123456
+# === Required local Worker secrets (.dev.vars, never commit) ===
+NUXT_SESSION_PASSWORD=replace-with-at-least-32-random-characters
+CFRAME_BOOTSTRAP_TOKEN=replace-with-a-different-32-character-random-token
 
-# === Authentication Settings ===
+# === Optional Authentication Settings ===
 NUXT_OAUTH_GITHUB_CLIENT_ID=your-dev-github-client-id
 NUXT_OAUTH_GITHUB_CLIENT_SECRET=your-dev-github-client-secret
-NUXT_SESSION_PASSWORD=your-32-character-development-key
-
-# === Storage Settings (can use MinIO for development) ===
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=http://localhost:9000
-NUXT_PROVIDER_S3_BUCKET=chronoframe-dev
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=minioadmin
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=minioadmin
 
 # === Map Services (optional) ===
 NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-development-token

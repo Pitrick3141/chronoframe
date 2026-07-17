@@ -1,198 +1,73 @@
-# 存储提供器配置
+# Cloudflare 存储绑定
 
-ChronoFrame 支持多种存储后端来保存您的照片和缩略图。本文档将详细介绍如何配置不同的存储提供器。
+Workers 版 ChronoFrame 使用固定的存储架构。存储通过 `wrangler.jsonc` 中的 Cloudflare bindings 配置，不再从控制台选择 S3、本地文件系统或 OpenList provider。
 
-| 提供器                            | 支持 | 适用场景           | 成本         |
-| --------------------------------- | :--: | ------------------ | ------------ |
-| [**S3 兼容存储**](#s3-兼容存储)   |  ✅  | 生产环境，云存储   | 按使用量计费 |
-| [**本地文件系统**](#本地文件系统) |  ✅  | 测试环境，离线部署 | 免费         |
-| [**OpenList**](#openlist-存储)    |  ✅  | 个人云存储，NAS    | 免费         |
+## 存储映射
 
-## S3 兼容存储
+| 数据                     | 服务                            | 绑定           |
+| ------------------------ | ------------------------------- | -------------- |
+| 应用状态与照片元数据     | D1                              | `DB`           |
+| 所有图片二进制           | Cloudflare Images Hosted Images | `IMAGES`       |
+| 所有视频二进制与播放     | Cloudflare Stream               | `STREAM`       |
+| 其他非图片、非视频对象   | R2                              | `MEDIA_BUCKET` |
+| 构建后的 Nuxt 客户端文件 | Workers Assets                  | `ASSETS`       |
 
-S3 兼容存储是最推荐的生产环境选项，支持所有主流云服务提供商。
+绑定名属于应用接口的一部分。如果资源名称发生变化，只修改 `wrangler.jsonc` 中绑定指向的目标，不要修改绑定名。
 
-### 基础配置
+## D1
 
-```bash
-# 设置存储提供器为 S3
-NUXT_STORAGE_PROVIDER=s3
-
-# S3 基础配置
-NUXT_PROVIDER_S3_ENDPOINT=https://your-s3-endpoint.com
-NUXT_PROVIDER_S3_BUCKET=chronoframe-photos
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=your-access-key-id
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=your-secret-access-key
-
-# 可选配置
-NUXT_PROVIDER_S3_PREFIX=photos/
-NUXT_PROVIDER_S3_CDN_URL=https://cdn.example.com
-NUXT_PROVIDER_S3_FORCE_PATH_STYLE=false
-```
-
-### 云服务商配置示例
-
-#### AWS S3
+创建数据库，并把返回的 UUID 填入 `wrangler.jsonc`：
 
 ```bash
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=https://s3.amazonaws.com
-NUXT_PROVIDER_S3_BUCKET=my-chronoframe-bucket
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=AKIA...
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=...
-NUXT_PROVIDER_S3_CDN_URL=https://d1234567890.cloudfront.net
+pnpm d1:create
+pnpm d1:migrate:remote
 ```
 
-#### Cloudflare R2
+D1 只保存记录，不保存图片或视频正文。升级 schema 或批量导入前请先备份。
+
+## Cloudflare Images Hosted Images
+
+Hosted Images 需要启用 [付费存储计划](https://developers.cloudflare.com/images/pricing/)。Worker 通过 `IMAGES` 绑定上传、检查、交付和删除图片，无需在应用设置中保存 Images API Token。
+
+应用不要求账户级交付变体。`/media/images/:id` 先按 D1 校验可见性，再返回最长边不超过 4096 px、已剥离元数据的 WebP 展示图；`/media/images/:id/thumbnail` 返回 600 px WebP 缩略图。Hosted Image 原始字节仅管理员可通过 `/media/images/:id/source` 获取。不要为 ChronoFrame 媒体创建始终公开的变体，否则直连交付会绕过隐藏相册鉴权。
+
+Hosted Images **每个已存图片最多 10 MiB**。ChronoFrame 可接收最多 **25 MiB** 的复合 JPEG Motion Photo，但会在存储前完成拆分：静态 JPEG（仍不得超过 10 MiB）进入 Hosted Images，经校验的内嵌 MP4 进入 Stream。输入格式支持 JPEG、PNG、GIF、WebP、SVG 与 HEIC，AVIF 输入仅限 Enterprise。图片尺寸、总像素数和动画图片另有限制，请查看最新的 [Images 限制](https://developers.cloudflare.com/images/get-started/limits/)。
+
+超过限制或格式不兼容的图片必须在上传前转换或缩小。非图片文件不能上传到 `IMAGES`。
+
+## Cloudflare Stream
+
+所有受支持的视频（包括 Live/Motion Photo 伴侣）均由 Stream 存储和传输。`STREAM` binding 创建一次性的 [Direct Creator Upload](https://developers.cloudflare.com/stream/uploading-videos/direct-creator-uploads/) URL，浏览器再将 multipart 正文直接发送到 Cloudflare，不会获得 API Token。处理完成后，ChronoFrame 使用 Stream 的 HLS manifest 播放。
+
+Binding 当前创建 basic POST 上传。Cloudflare 要求这类文件**小于 200 MB**，因此 ChronoFrame 默认限制为 **199999999 字节**。达到或超过 200 MB 的文件必须使用 tus，而当前上传流程没有实现 tus。`NUXT_CLOUDFLARE_STREAM_MAX_DURATION_SECONDS` 默认为 **600**。
+
+Stream 按[存储分钟和传输分钟](https://developers.cloudflare.com/stream/pricing/)计费，而不是按 R2 bytes 或出口流量计费。Direct Creator Upload 在完成、过期或失败前会按 `maxDurationSeconds` 预留存储容量；完成后按视频实际时长占用。
+
+Worker 通过 `STREAM` binding 操作视频时不需要 Stream API Token，API 凭据不会进入应用代码或浏览器。但仍必须配置 Cloudflare 订阅响应返回的 `CFRAME_STREAM_WEBHOOK_SECRET`，用于校验视频处理通知。
+
+## R2
+
+创建 `wrangler.jsonc` 中声明的存储桶：
 
 ```bash
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=https://[account-id].r2.cloudflarestorage.com
-NUXT_PROVIDER_S3_BUCKET=chronoframe
-NUXT_PROVIDER_S3_REGION=auto
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=...
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=...
-NUXT_PROVIDER_S3_CDN_URL=https://photos.example.com
+pnpm exec wrangler r2 bucket create chronoframe-media
 ```
 
-#### 阿里云 OSS
+应用通过 `MEDIA_BUCKET` 绑定访问 R2，因此不需要 S3 access key、endpoint、公开存储桶或浏览器直传 CORS。仅限管理员的 `/api/objects` 流程会把对象生命周期元数据保存到 D1，在 finalize 时核对 R2 对象，并通过受控的 Worker 路由下载，而不是公开 R2 域名。
+
+R2 严格只保存既非图片也非视频的对象。图片进入 Hosted Images，所有视频进入 Stream。
+
+## 本地开发
+
+Wrangler 会提供 D1、R2 与 Hosted Images 的本地绑定实现：
 
 ```bash
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
-NUXT_PROVIDER_S3_BUCKET=chronoframe-photos
-NUXT_PROVIDER_S3_REGION=oss-cn-hangzhou
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=LTAI...
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=...
-NUXT_PROVIDER_S3_CDN_URL=https://cdn.example.com
+pnpm d1:migrate:local
+pnpm dev:worker
 ```
 
-#### 腾讯云 COS
+本地 D1/R2/Images 数据与生产隔离。Stream Direct Creator Upload 与 HLS 播放应在连接账号的预览部署中测试。日常开发不要使用远端资源，除非确实要修改它们。
 
-```bash
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=https://cos.ap-beijing.myqcloud.com
-NUXT_PROVIDER_S3_BUCKET=chronoframe-1234567890
-NUXT_PROVIDER_S3_REGION=ap-beijing
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=AKID...
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=...
-```
+## 旧存储 Provider
 
-#### MinIO 自托管
-
-```bash
-NUXT_STORAGE_PROVIDER=s3
-NUXT_PROVIDER_S3_ENDPOINT=https://minio.example.com
-NUXT_PROVIDER_S3_BUCKET=chronoframe
-NUXT_PROVIDER_S3_REGION=us-east-1
-NUXT_PROVIDER_S3_ACCESS_KEY_ID=minioadmin
-NUXT_PROVIDER_S3_SECRET_ACCESS_KEY=minioadmin
-# MinIO 需要启用路径样式访问
-NUXT_PROVIDER_S3_FORCE_PATH_STYLE=true
-```
-
-### 存储桶配置
-
-#### CORS 设置
-
-推荐的 CORS 配置：
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://your-domain.com"],
-    "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3000
-  }
-]
-```
-
-## 本地文件系统
-
-本地存储将文件保存在服务器文件系统中。
-
-```bash
-# 设置存储提供器为本地
-NUXT_STORAGE_PROVIDER=local
-
-# 本地存储配置
-NUXT_PROVIDER_LOCAL_PATH=/app/data/storage
-NUXT_PROVIDER_LOCAL_BASE_URL=/storage
-```
-
-## OpenList 存储
-
-OpenList 是一个开源的文件管理系统，提供对各种云存储服务的 API 访问。此提供程序允许您使用与 OpenList 兼容的服务作为照片存储后端。
-
-| 环境变量                                   | 类型   | 必需 | 默认值           | 描述                    |
-| ------------------------------------------ | ------ | ---- | ---------------- | ----------------------- |
-| `NUXT_PROVIDER_OPENLIST_BASE_URL`          | string | 是   | -                | OpenList 服务的基础 URL |
-| `NUXT_PROVIDER_OPENLIST_ROOT_PATH`         | string | 是   | -                | 根存储路径              |
-| `NUXT_PROVIDER_OPENLIST_TOKEN`             | string | 必需 | -                | 认证令牌（认证时必需）  |
-| `NUXT_PROVIDER_OPENLIST_ENDPOINT_UPLOAD`   | string | 可选 | `/api/fs/put`    | 上传端点                |
-| `NUXT_PROVIDER_OPENLIST_ENDPOINT_DOWNLOAD` | string | 可选 | -                | 下载端点                |
-| `NUXT_PROVIDER_OPENLIST_ENDPOINT_LIST`     | string | 可选 | -                | 列表端点                |
-| `NUXT_PROVIDER_OPENLIST_ENDPOINT_DELETE`   | string | 可选 | `/api/fs/remove` | 删除端点                |
-| `NUXT_PROVIDER_OPENLIST_ENDPOINT_META`     | string | 可选 | `/api/fs/get`    | 元数据端点              |
-| `NUXT_PROVIDER_OPENLIST_PATH_FIELD`        | string | 可选 | `path`           | 路径字段名              |
-| `NUXT_PROVIDER_OPENLIST_CDN_URL`           | string | 可选 | -                | CDN URL                 |
-
-**认证：**
-
-OpenList 提供程序需要令牌认证以确保安全访问：
-
-```bash
-NUXT_PROVIDER_OPENLIST_TOKEN=your-static-token
-```
-
-### 基础配置
-
-```bash
-# 设置存储提供器为 OpenList
-NUXT_STORAGE_PROVIDER=openlist
-
-# OpenList 基础配置
-NUXT_PROVIDER_OPENLIST_BASE_URL=https://your-openlist-server.com
-NUXT_PROVIDER_OPENLIST_ROOT_PATH=/chronoframe/photos
-
-# 认证配置 - Token 认证
-NUXT_PROVIDER_OPENLIST_TOKEN=your-api-token
-
-# 可选配置
-NUXT_PROVIDER_OPENLIST_ENDPOINT_UPLOAD=/api/fs/put
-NUXT_PROVIDER_OPENLIST_ENDPOINT_DOWNLOAD=
-NUXT_PROVIDER_OPENLIST_ENDPOINT_LIST=
-NUXT_PROVIDER_OPENLIST_ENDPOINT_DELETE=/api/fs/remove
-NUXT_PROVIDER_OPENLIST_ENDPOINT_META=/api/fs/get
-NUXT_PROVIDER_OPENLIST_PATH_FIELD=path
-NUXT_PROVIDER_OPENLIST_CDN_URL=
-```
-
-### 配置示例
-
-#### OpenList（理论上Alist也可行）
-
-```bash
-NUXT_STORAGE_PROVIDER=openlist
-NUXT_PROVIDER_OPENLIST_BASE_URL=https://openlist.example.com
-NUXT_PROVIDER_OPENLIST_ROOT_PATH=/115pan/chronoframe
-NUXT_PROVIDER_OPENLIST_TOKEN=your-static-token
-```
-
-## 常见问题
-
-:::details `The AWS Access Key Id you provided does not exist in our records`
-访问密钥错误，检查 `ACCESS_KEY_ID` 和 `SECRET_ACCESS_KEY` 是否正确。
-:::
-
-:::details `The specified bucket does not exist`
-存储桶不存在，确认存储桶名称正确，且在指定区域存在
-:::
-
-:::details 可以上传但无法访问图片，控制台提示 `Access to fetch at '...' from origin '...' has been blocked by CORS policy`
-存储桶 CORS 配置错误，参考 [CORS 设置](#CORS-设置) 进行配置。
-:::
+S3 兼容存储、本地文件系统与 OpenList 属于上一代 Node/Docker 架构，不再是 Workers 版本可选择的 provider。现有图片必须迁移到 Hosted Images、视频迁移到 Stream、其余对象迁移到 R2，且需要明确、可验证的迁移流程，详见 [迁移现有安装](/zh/guide/migrate-to-workers)。

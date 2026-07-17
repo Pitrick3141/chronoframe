@@ -1,97 +1,113 @@
+import { and, asc, eq, gt, inArray } from 'drizzle-orm'
 import { z } from 'zod'
-import { eq, inArray } from 'drizzle-orm'
 
-/**
- * 批量重试失败的任务
- */
+import {
+  finalizeExistingQueueTask,
+  type WorkersPipelinePayload,
+} from '~~/server/services/cloudflare/finalize-upload'
+
+// A photo retry currently consumes up to roughly seven D1 statements. Five
+// tasks leave headroom beneath the Free-plan 50-query invocation ceiling for
+// request initialization and page selection as well.
+const MAX_RETRY_TASKS_PER_REQUEST = 5
+
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
-  try {
-    const { taskIds, retryAll = false } = await readValidatedBody(
-      event,
-      z.object({
-        taskIds: z.array(z.number().int().positive()).optional(),
+  const { cursor, taskIds, retryAll } = await readValidatedBody(
+    event,
+    z
+      .object({
+        cursor: z.number().int().positive().optional(),
+        taskIds: z
+          .array(z.number().int().positive())
+          .max(MAX_RETRY_TASKS_PER_REQUEST)
+          .optional(),
         retryAll: z.boolean().optional().default(false),
-      }).parse,
-    )
-
-    if (!retryAll && (!taskIds || taskIds.length === 0)) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Either taskIds array or retryAll flag must be provided',
       })
-    }
+      .refine((body) => body.retryAll || Boolean(body.taskIds?.length), {
+        message: 'Either taskIds or retryAll must be provided',
+      })
+      .refine((body) => body.retryAll || body.cursor === undefined, {
+        message: 'cursor is only valid with retryAll',
+      }).parse,
+  )
 
-    const db = useDB()
+  const db = useDB()
+  const requestedIds = taskIds ?? []
+  const selectedPage = retryAll
+    ? await db
+        .select()
+        .from(tables.pipelineQueue)
+        .where(
+          cursor === undefined
+            ? eq(tables.pipelineQueue.status, 'failed')
+            : and(
+                eq(tables.pipelineQueue.status, 'failed'),
+                gt(tables.pipelineQueue.id, cursor),
+              ),
+        )
+        .orderBy(asc(tables.pipelineQueue.id))
+        .limit(MAX_RETRY_TASKS_PER_REQUEST + 1)
+    : await db
+        .select()
+        .from(tables.pipelineQueue)
+        .where(inArray(tables.pipelineQueue.id, [...new Set(requestedIds)]))
 
-    let whereCondition
-    if (retryAll) {
-      whereCondition = eq(tables.pipelineQueue.status, 'failed')
-    } else {
-      whereCondition = inArray(tables.pipelineQueue.id, taskIds!)
-    }
+  const hasMore = retryAll && selectedPage.length > MAX_RETRY_TASKS_PER_REQUEST
+  const selected = selectedPage.slice(0, MAX_RETRY_TASKS_PER_REQUEST)
+  const nextCursor = hasMore ? selected.at(-1)?.id : undefined
 
-    // 检查要重试的任务
-    const tasksToRetry = await db
-      .select()
-      .from(tables.pipelineQueue)
-      .where(whereCondition)
+  const failedTasks = selected.filter((task) => task.status === 'failed')
+  const skippedTasks = selected.filter((task) => task.status !== 'failed')
+  const results = []
 
-    const failedTasks = tasksToRetry.filter((task) => task.status === 'failed')
-
-    if (failedTasks.length === 0) {
-      return {
-        success: true,
-        message: 'No failed tasks found to retry',
-        retriedCount: 0,
-        skippedCount: retryAll ? 0 : taskIds?.length || 0,
-      }
-    }
-
-    const nonFailedTasks = tasksToRetry.filter(
-      (task) => task.status !== 'failed',
-    )
-
-    // 批量重置失败任务的状态
-    const failedTaskIds = failedTasks.map((task) => task.id)
-
+  for (const task of failedTasks) {
     await db
       .update(tables.pipelineQueue)
       .set({
         status: 'pending',
         statusStage: null,
         errorMessage: null,
-        attempts: 0, // 重置尝试次数
-        createdAt: new Date(), // 更新创建时间以便重新调度
+        attempts: 0,
+        createdAt: new Date(),
+        completedAt: null,
       })
-      .where(inArray(tables.pipelineQueue.id, failedTaskIds))
+      .where(eq(tables.pipelineQueue.id, task.id))
 
-    return {
-      success: true,
-      message: `Successfully reset ${failedTasks.length} failed tasks for retry`,
-      retriedCount: failedTasks.length,
-      skippedCount: nonFailedTasks.length,
-      retriedTasks: failedTasks.map((task) => ({
-        id: task.id,
-        type: task.payload.type,
-        storageKey: task.payload.storageKey,
-      })),
-      skippedTasks: nonFailedTasks.map((task) => ({
-        id: task.id,
-        status: task.status,
-        reason: `Task is not in failed status (current: ${task.status})`,
-      })),
-    }
-  } catch (error) {
-    if (error && typeof error === 'object' && 'statusCode' in error) {
-      throw error
-    }
+    results.push(
+      await finalizeExistingQueueTask(
+        task.id,
+        task.payload as WorkersPipelinePayload,
+      ),
+    )
+  }
 
-    console.error('Failed to batch retry tasks:', error)
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Failed to batch retry tasks',
-    })
+  const completedCount = results.filter(
+    (result) => result.status === 'completed',
+  ).length
+  const pendingCount = results.filter(
+    (result) => result.status === 'in-stages',
+  ).length
+  const failedCount = results.filter(
+    (result) => result.status === 'failed',
+  ).length
+
+  return {
+    success: failedCount === 0,
+    message: `Retried ${results.length} tasks; ${completedCount} completed, ${pendingCount} processing, ${failedCount} failed`,
+    retriedCount: results.length,
+    completedCount,
+    pendingCount,
+    failedCount,
+    skippedCount: skippedTasks.length,
+    hasMore,
+    nextCursor,
+    results,
+    skippedTasks: skippedTasks.map((task) => ({
+      id: task.id,
+      status: task.status,
+      reason: `Task is not in failed status (current: ${task.status})`,
+    })),
   }
 })

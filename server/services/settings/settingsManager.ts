@@ -9,9 +9,8 @@ import type { SettingKey, SettingNamespace } from './contants'
 
 export class SettingsManager {
   private static instance: SettingsManager
-  protected settingsCache: Map<string, SettingValue> = new Map()
   protected _logger = logger.dynamic('settings-mgr')
-  protected isInitializing = false
+  private initialized = false
 
   private constructor() {}
 
@@ -20,23 +19,6 @@ export class SettingsManager {
       SettingsManager.instance = new SettingsManager()
     }
     return SettingsManager.instance
-  }
-
-  /**
-   * Set the initializing flag externally
-   * Used during plugin initialization to prevent storage provider switch triggers
-   * @param flag Boolean flag to set
-   */
-  setInitializingFlag(flag: boolean): void {
-    this.isInitializing = flag
-  }
-
-  /**
-   * Check if currently initializing
-   * @returns true if initializing, false otherwise
-   */
-  isInitializing_(): boolean {
-    return this.isInitializing
   }
 
   /**
@@ -124,47 +106,53 @@ export class SettingsManager {
    * @param configs Array of setting configurations
    */
   async init(configs: SettingConfig[]): Promise<void> {
+    if (this.initialized) return
+
+    // Do not cache an in-flight D1 promise in isolate-global state. Concurrent
+    // cold-start requests may each run this idempotent insert, but every D1
+    // operation then remains owned by the request that created it.
+    await this.initialize(configs)
+    this.initialized = true
+  }
+
+  private async initialize(configs: SettingConfig[]): Promise<void> {
     const db = useDB()
 
     this._logger.info('Initializing settings manager with default settings')
 
-    for (const config of configs) {
-      // Skip if namespace or key is missing
+    const values = configs.flatMap((config) => {
       if (!config.namespace || !config.key) {
         this._logger.warn('Skipping config with missing namespace or key')
-        continue
+        return []
       }
 
-      // Check if setting exists
-      const existing = db
-        .select()
-        .from(tables.settings)
-        .where(
-          and(
-            eq(tables.settings.namespace, config.namespace),
-            eq(tables.settings.key, config.key),
-          ),
-        )
-        .get()
+      return [
+        {
+          namespace: config.namespace,
+          key: config.key,
+          type: config.type,
+          value: this.serialize(config.defaultValue),
+          defaultValue: this.serialize(config.defaultValue),
+          label: config.label ?? null,
+          description: config.description ?? null,
+          isPublic: config.isPublic ?? false,
+          isReadonly: config.isReadonly ?? false,
+          isSecret: config.isSecret ?? false,
+          enum: config.enum ? [...config.enum] : null,
+        },
+      ]
+    })
 
-      // If not exists and has default value, insert it
-      if (!existing) {
-        db.insert(tables.settings)
-          .values({
-            namespace: config.namespace,
-            key: config.key,
-            type: config.type,
-            value: this.serialize(config.defaultValue),
-            defaultValue: this.serialize(config.defaultValue),
-            label: config.label,
-            description: config.description,
-            isPublic: config.isPublic,
-            isReadonly: config.isReadonly,
-            isSecret: config.isSecret,
-            enum: config.enum ? config.enum : null,
-          })
-          .run()
-      }
+    // Keep each statement below D1's conservative bind-parameter ceiling.
+    const rowsPerStatement = 8
+    for (let offset = 0; offset < values.length; offset += rowsPerStatement) {
+      await db
+        .insert(tables.settings)
+        .values(values.slice(offset, offset + rowsPerStatement))
+        .onConflictDoNothing({
+          target: [tables.settings.namespace, tables.settings.key],
+        })
+        .run()
     }
   }
 
@@ -175,15 +163,9 @@ export class SettingsManager {
   ): Promise<T | null> {
     const cacheKey = this.getCacheKey(namespace, key)
 
-    // Check cache first
-    if (this.settingsCache.has(cacheKey)) {
-      this._logger.debug(`Cache hit for setting ${cacheKey}`)
-      return this.settingsCache.get(cacheKey) as T
-    }
-
-    // If not in cache, fetch from database
+    // Read through D1 so settings changed by another Worker isolate stay fresh.
     const db = useDB()
-    const setting = db
+    const setting = await db
       .select()
       .from(tables.settings)
       .where(
@@ -204,7 +186,6 @@ export class SettingsManager {
 
     this._logger.debug(`Setting ${cacheKey} fetched from database`)
     const value = this.deserialize(setting.value, setting.type)
-    this.settingsCache.set(cacheKey, value)
 
     return value as T
   }
@@ -217,9 +198,8 @@ export class SettingsManager {
     sudo = false,
   ): Promise<void> {
     const db = useDB()
-    const cacheKey = this.getCacheKey(namespace, key)
 
-    const existing = db
+    const existing = await db
       .select()
       .from(tables.settings)
       .where(
@@ -253,7 +233,8 @@ export class SettingsManager {
 
     const serializedValue = this.serialize(value)
 
-    db.update(tables.settings)
+    await db
+      .update(tables.settings)
       .set({
         value: serializedValue,
         updatedAt: new Date(),
@@ -268,89 +249,13 @@ export class SettingsManager {
       .run()
 
     this._logger.info(`Setting ${namespace}:${key} updated`)
-    this.settingsCache.set(cacheKey, value)
-
-    // Trigger storage provider switch if storage:provider is being changed
-    // Skip during initialization as storage manager is not yet initialized
-    if (namespace === 'storage' && key === 'provider' && !this.isInitializing) {
-      // Use setImmediate to avoid blocking and handle async operation
-      setImmediate(() => {
-        this.triggerStorageProviderSwitch(value as number).catch((error) => {
-          this._logger.error(
-            'Failed to trigger storage provider switch:',
-            error,
-          )
-        })
-      })
-    }
-  }
-
-  /**
-   * Trigger storage provider switch
-   * @param providerId Provider ID to switch to
-   */
-  private async triggerStorageProviderSwitch(
-    providerId: number,
-  ): Promise<void> {
-    try {
-      // Dynamically import to avoid circular dependency issues
-      const { getGlobalStorageManager, setGlobalStorageManager } =
-        await import('~~/server/services/storage/events')
-      const { StorageManager } = await import('~~/server/services/storage')
-      const loggerModule = await import('~~/server/utils/logger')
-
-      const newProvider = await this.storage.getProviderById(providerId)
-      if (!newProvider) {
-        this._logger.error(`Provider with ID ${providerId} not found`)
-        return
-      }
-
-      let storageManager = getGlobalStorageManager()
-      if (!storageManager) {
-        this._logger.info(
-          `Storage manager not initialized, bootstrapping with provider: ${newProvider.name} (ID: ${providerId})`,
-        )
-        try {
-          storageManager = new StorageManager(
-            newProvider.config,
-            loggerModule.logger.dynamic('storage'),
-          )
-          setGlobalStorageManager(storageManager)
-
-          if (newProvider.config.provider === 'local') {
-            const fs = await import('node:fs/promises')
-            await fs.mkdir(newProvider.config.basePath, { recursive: true })
-          }
-
-          this._logger.info('Storage manager bootstrap completed')
-          return
-        } catch (bootstrapError) {
-          this._logger.error(
-            'Failed to bootstrap storage manager with new provider:',
-            bootstrapError,
-          )
-          return
-        }
-      }
-
-      this._logger.info(
-        `Triggering storage provider switch to: ${newProvider.name} (ID: ${providerId})`,
-      )
-
-      await storageManager.registerProvider(
-        newProvider.config,
-        loggerModule.logger.dynamic('storage'),
-      )
-    } catch (error) {
-      this._logger.error('Failed to switch storage provider:', error)
-    }
   }
 
   async getNamespace(
     namespace: SettingNamespace,
   ): Promise<Record<string, SettingValue>> {
     const db = useDB()
-    const settings = db
+    const settings = await db
       .select()
       .from(tables.settings)
       .where(eq(tables.settings.namespace, namespace))
@@ -366,7 +271,7 @@ export class SettingsManager {
 
   async getSchema(): Promise<SettingConfig[]> {
     const db = useDB()
-    const settings = db.select().from(tables.settings).all()
+    const settings = await db.select().from(tables.settings).all()
 
     return settings.map((setting) => ({
       namespace: setting.namespace,
@@ -389,7 +294,7 @@ export class SettingsManager {
   public storage = {
     async getProviders(): Promise<SettingStorageProvider[]> {
       const db = useDB()
-      const providers = db
+      const providers = await db
         .select()
         .from(tables.settings_storage_providers)
         .all()
@@ -398,7 +303,7 @@ export class SettingsManager {
 
     async getProviderById(id: number): Promise<SettingStorageProvider | null> {
       const db = useDB()
-      const provider = db
+      const provider = await db
         .select()
         .from(tables.settings_storage_providers)
         .where(eq(tables.settings_storage_providers.id, id))
@@ -421,14 +326,19 @@ export class SettingsManager {
       providerConfig: NewSettingStorageProvider,
     ): Promise<number> {
       const db = useDB()
-      const result = db
+      const result = await db
         .insert(tables.settings_storage_providers)
         .values({
           name: providerConfig.name,
           provider: providerConfig.provider,
           config: providerConfig.config,
         })
-        .run()
+        .returning({ id: tables.settings_storage_providers.id })
+        .get()
+
+      if (!result) {
+        throw new Error('Failed to create storage provider')
+      }
 
       // If no active provider and this is the only provider, set this as active
       const currentActiveProvider = await settingsManager.get<number>(
@@ -436,13 +346,9 @@ export class SettingsManager {
         'provider',
       )
       if (!currentActiveProvider && (await this.getProviders()).length === 1) {
-        await settingsManager.set(
-          'storage',
-          'provider',
-          result.lastInsertRowid as number,
-        )
+        await settingsManager.set('storage', 'provider', result.id)
       }
-      return result.lastInsertRowid as number
+      return result.id
     },
 
     async updateProvider(
@@ -450,7 +356,8 @@ export class SettingsManager {
       providerConfig: Partial<NewSettingStorageProvider['config']>,
     ): Promise<void> {
       const db = useDB()
-      db.update(tables.settings_storage_providers)
+      await db
+        .update(tables.settings_storage_providers)
         .set({
           ...providerConfig,
         })
@@ -460,7 +367,8 @@ export class SettingsManager {
 
     async deleteProvider(id: number): Promise<void> {
       const db = useDB()
-      db.delete(tables.settings_storage_providers)
+      await db
+        .delete(tables.settings_storage_providers)
         .where(eq(tables.settings_storage_providers.id, id))
         .run()
     },

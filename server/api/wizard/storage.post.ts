@@ -1,26 +1,29 @@
-import { z } from 'zod'
-import { settingsManager } from '~~/server/services/settings/settingsManager'
-import { storageConfigSchema } from '~~/shared/types/storage'
+import { getCloudflareBindings } from '~~/server/utils/cloudflare-bindings'
 
 export default eventHandler(async (event) => {
-  const body = await readValidatedBody(
-    event,
-    z.object({
-      name: z.string().min(1),
-      config: storageConfigSchema,
-    }).parse,
-  )
+  const session = await requireUserSession(event)
+  if (!session.user.isAdmin) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Admin privileges required',
+    })
+  }
 
-  const id = await settingsManager.storage.addProvider({
-    name: body.name,
-    provider: body.config.provider,
-    config: body.config,
-  })
+  const bindings = getCloudflareBindings()
+  const status = {
+    d1: Boolean(bindings.DB),
+    images: Boolean(bindings.IMAGES),
+    r2: Boolean(bindings.MEDIA_BUCKET),
+    stream: Boolean(bindings.STREAM),
+  }
 
-  // Set as active provider if it's the first one or explicitly requested?
-  // The addProvider method already sets it as active if it's the only one.
-  // We might want to force set it as active here since it's the wizard.
-  await settingsManager.set('storage', 'provider', id)
+  if (Object.values(status).some((configured) => !configured)) {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'Required Cloudflare bindings are not configured',
+      data: { bindings: status },
+    })
+  }
 
-  return { success: true, id }
+  return { success: true, bindings: status }
 })

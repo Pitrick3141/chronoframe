@@ -6,6 +6,8 @@ definePageMeta({
 })
 
 const loading = ref(false)
+// Deliberately kept in component memory instead of the persisted wizard store.
+const bootstrapToken = ref('')
 const store = useWizardStore()
 const toast = useToast()
 
@@ -18,25 +20,8 @@ async function onComplete() {
     // 2. Prepare Site Data
     const siteData = store.site
 
-    // 3. Prepare Storage Data
-    const storageState = store.storage
-    const storageProvider = storageState.provider
-    const storageConfig: Record<string, any> = { provider: storageProvider }
-
-    // Extract provider specific keys
-    Object.keys(storageState).forEach((key) => {
-      if (key.startsWith(storageProvider + '.')) {
-        const configKey = key.split('.')[1]!
-        storageConfig[configKey] = storageState[key]
-      }
-    })
-
-    const storageData = {
-      name: storageState.name,
-      config: storageConfig,
-    }
-
-    // 4. Prepare Map Data
+    // 3. Prepare Map Data. Storage is provisioned through the Worker's
+    // DB, IMAGES and MEDIA_BUCKET bindings and is never submitted by clients.
     const mapState = store.map
     const mapProvider = mapState.provider
     const mapTokenKey = `${mapProvider}.token`
@@ -48,13 +33,15 @@ async function onComplete() {
       style: mapState[mapStyleKey],
     }
 
-    // 5. Submit All
+    // 4. Submit All
     await $fetch('/api/wizard/submit', {
       method: 'POST',
+      headers: {
+        'X-Chronoframe-Bootstrap-Token': bootstrapToken.value,
+      },
       body: {
         admin: adminData,
         site: siteData,
-        storage: storageData,
         map: mapData,
       },
     })
@@ -69,10 +56,15 @@ async function onComplete() {
     console.error(error)
     toast.add({
       title: $t('onboarding.complete.setupFailedTitle'),
-      description: error.data?.message || $t('onboarding.complete.setupFailedDescription'),
+      description:
+        error.data?.message || $t('onboarding.complete.setupFailedDescription'),
       color: 'error',
     })
   } finally {
+    // Neither bootstrap nor administrator credentials should survive an
+    // attempt, regardless of whether setup succeeded or failed.
+    bootstrapToken.value = ''
+    store.clearAdminSecrets()
     loading.value = false
   }
 }
@@ -105,6 +97,21 @@ async function onComplete() {
           {{ $t('onboarding.complete.body') }}
         </p>
       </div>
+
+      <WizardFormField
+        class="w-full max-w-md text-left"
+        :label="$t('onboarding.complete.bootstrapTokenLabel')"
+        :help="$t('onboarding.complete.bootstrapTokenHelp')"
+        name="bootstrapToken"
+      >
+        <WizardInput
+          v-model="bootstrapToken"
+          type="password"
+          autocomplete="off"
+          :placeholder="$t('onboarding.complete.bootstrapTokenPlaceholder')"
+          @keyup.enter="onComplete"
+        />
+      </WizardFormField>
 
       <WizardButton
         size="xl"

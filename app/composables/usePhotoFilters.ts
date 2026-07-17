@@ -134,7 +134,7 @@ export function usePhotoFilters() {
           photo.country || '',
           photo.title || '',
           photo.description || '',
-          photo.storageKey || '',
+          photo.displayFilename || '',
           photo.locationName || '',
         ]
           .join(' ')

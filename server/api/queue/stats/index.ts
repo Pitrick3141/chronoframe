@@ -1,33 +1,39 @@
+import { sql } from 'drizzle-orm'
+
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
-  try {
-    const workerPool = globalThis.__workerPool
-
-    if (!workerPool) {
-      throw createError({
-        statusCode: 503,
-        statusMessage: 'Worker pool not initialized',
-      })
-    }
-
-    const poolStats = workerPool.getPoolStats()
-    const queueStats = await workerPool.getQueueStats()
-
-    return {
-      timestamp: new Date().toISOString(),
-      pool: {
-        isActive: workerPool.isActive(),
-        workerCount: workerPool.getWorkerCount(),
-        ...poolStats,
-      },
-      queue: queueStats,
-    }
-  } catch (error) {
-    throw createError({
-      statusCode: 500,
-      statusMessage:
-        error instanceof Error ? error.message : 'Failed to get queue status',
+  const rows = await useDB()
+    .select({
+      status: tables.pipelineQueue.status,
+      count: sql<number>`count(*)`,
     })
+    .from(tables.pipelineQueue)
+    .groupBy(tables.pipelineQueue.status)
+
+  const queue = {
+    pending: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0,
+    total: 0,
+  }
+
+  for (const row of rows) {
+    const count = Number(row.count)
+    queue.total += count
+    if (row.status === 'in-stages') queue.processing = count
+    else queue[row.status] = count
+  }
+
+  return {
+    timestamp: new Date().toISOString(),
+    pool: {
+      // There is no process-global worker pool in a Cloudflare isolate.
+      isActive: false,
+      workerCount: 0,
+      mode: 'request-synchronous',
+    },
+    queue,
   }
 })

@@ -1,48 +1,45 @@
-import { drizzle } from 'drizzle-orm/better-sqlite3'
-import Database from 'better-sqlite3'
+import { env } from 'cloudflare:workers'
+import { drizzle } from 'drizzle-orm/d1'
+import type { H3Event } from 'h3'
 
 import * as schema from '../database/schema'
 
 export const tables = schema
 export { eq, and, or, inArray } from 'drizzle-orm'
 
-// 创建单例数据库连接
-let dbInstance: ReturnType<typeof drizzle> | null = null
-let sqliteInstance: Database.Database | null = null
-
-export function useDB() {
-  if (!dbInstance || !sqliteInstance) {
-    // 创建数据库连接，启用WAL模式以提高并发性能
-    sqliteInstance = new Database('data/app.sqlite3', {
-      verbose:
-        process.env.NODE_ENV === 'development'
-          ? logger.dynamic('db').verbose
-          : undefined,
-    })
-
-    // 启用WAL模式以提高并发性能
-    sqliteInstance.pragma('journal_mode = WAL')
-    sqliteInstance.pragma('synchronous = NORMAL')
-    sqliteInstance.pragma('cache_size = 1000')
-    sqliteInstance.pragma('temp_store = MEMORY')
-
-    dbInstance = drizzle(sqliteInstance, { schema })
-  }
-
-  return dbInstance
+type CloudflareBindings = {
+  // Wrangler supplies the concrete D1Database type at deployment/typegen time.
+  // Keep this boundary structural so local Nuxt type generation does not
+  // depend on a generated worker-configuration.d.ts file.
+  DB?: any
 }
 
-// 优雅关闭数据库连接
-export function closeDB() {
-  if (sqliteInstance) {
-    sqliteInstance.close()
-    sqliteInstance = null
-    dbInstance = null
+/**
+ * Return a Drizzle client backed by the Worker D1 binding.
+ *
+ * `cloudflare:workers` exposes request-scoped bindings through a global proxy,
+ * so callers do not need to thread the H3 event through every service.
+ */
+export function useDB(_event?: H3Event) {
+  const { DB } = env as unknown as CloudflareBindings
+  if (!DB) {
+    throw new Error('Cloudflare D1 binding DB is not configured')
   }
+
+  return drizzle(DB, { schema })
 }
 
 export type User = typeof schema.users.$inferSelect
-export type Photo = typeof schema.photos.$inferSelect
+export type Photo = typeof schema.photos.$inferSelect & {
+  /** Safe presentation filename returned to public clients. */
+  displayFilename?: string | null
+  /** Admin-only route for immutable Hosted Images source bytes. */
+  sourceUrl?: string | null
+}
+export type ImageUploadIntent = typeof schema.imageUploadIntents.$inferSelect
+export type NewImageUploadIntent = typeof schema.imageUploadIntents.$inferInsert
+export type StoredObject = typeof schema.objects.$inferSelect
+export type NewStoredObject = typeof schema.objects.$inferInsert
 
 export type PipelineQueueItem = typeof schema.pipelineQueue.$inferSelect
 export type NewPipelineQueueItem = typeof schema.pipelineQueue.$inferInsert

@@ -9,15 +9,18 @@ export default eventHandler(async () => {
   const db = useDB()
 
   // 查询所有公开设置
-  const allSettings = db
+  const allSettings = await db
     .select()
     .from(tables.settings)
     .where(
-      or(
-        eq(tables.settings.isPublic, true),
-        and(
-          eq(tables.settings.namespace, 'system'),
-          eq(tables.settings.key, 'firstLaunch'),
+      and(
+        eq(tables.settings.isSecret, false),
+        or(
+          eq(tables.settings.isPublic, true),
+          and(
+            eq(tables.settings.namespace, 'system'),
+            eq(tables.settings.key, 'firstLaunch'),
+          ),
         ),
       ),
     )
@@ -27,9 +30,7 @@ export default eventHandler(async () => {
   const grouped: Record<string, Record<string, any>> = {}
 
   for (const setting of allSettings) {
-    if (!grouped[setting.namespace]) {
-      grouped[setting.namespace] = {}
-    }
+    const namespaceSettings = (grouped[setting.namespace] ??= {})
 
     // 解析值
     let value: any = setting.value
@@ -45,7 +46,7 @@ export default eventHandler(async () => {
       // 保持原始值
     }
 
-    grouped[setting.namespace][setting.key] = value
+    namespaceSettings[setting.key] = value
   }
 
   return {

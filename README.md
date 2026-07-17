@@ -6,10 +6,10 @@
 
 <p align="center">
   <a href="https://github.com/HoshinoSuzumi/chronoframe/releases/latest">
-    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe/stable?icon=docker&label=stable" alt="Latest Release">
+    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe/stable?label=stable" alt="Latest Release">
   </a>
   <a href="https://github.com/HoshinoSuzumi/chronoframe/releases?q=beta&expanded=false">
-    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe?icon=docker&label=nightly" alt="Latest Nightly Release">
+    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe?label=nightly" alt="Latest Nightly Release">
   </a>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -37,10 +37,10 @@ A smooth photo display and management application, supporting multiple image for
 
 - **Manage photos online** - Easily manage and browse photos via the web interface
 - **Explore map** - Browse photo locations on a map
-- **Smart EXIF parsing** - Automatically extracts metadata such as capture time, geolocation, and camera parameters
+- **Photo metadata** - Preserves supported source metadata for capture time, location, and camera details
 - **Reverse geocoding** - Automatically identifies photo shooting locations
 - **Multi-format support** - Supports mainstream formats including JPEG, PNG, HEIC/HEIF
-- **Smart thumbnails** - Efficient thumbnail generation using ThumbHash
+- **Cloudflare delivery** - Original bytes and dynamically transformed WebP thumbnails at the edge
 
 ### 🔧 Modern Tech Stack
 
@@ -49,105 +49,52 @@ A smooth photo display and management application, supporting multiple image for
 - **TailwindCSS** - Modern CSS framework
 - **Drizzle ORM** - Type-safe database ORM
 
-### ☁️ Flexible Storage Solutions
+### ☁️ Cloudflare-native Storage
 
-- **Multiple storage backends** - Supports S3-compatible storage, local filesystem
-- **CDN acceleration** - Configurable CDN URL for faster photo delivery
+- **D1** stores application and photo metadata through the `DB` binding.
+- **Cloudflare Images Hosted Images** stores every image through `IMAGES`.
+- **Cloudflare Stream** stores and delivers every video through `STREAM`.
+- **R2** stores other non-image, non-video objects through `MEDIA_BUCKET`.
+- **Workers Assets** serves the built Nuxt client through `ASSETS`.
 
-## 🐳 Deployment
+## ☁️ Deploy to Cloudflare Workers
 
-We recommend deploying with the prebuilt Docker image. [View the image on ghcr](https://github.com/HoshinoSuzumi/chronoframe/pkgs/container/chronoframe)
+ChronoFrame is Workers-only. The current bundle requires the Workers Paid plan because it exceeds the Workers Free 3 MB compressed script limit. A Cloudflare account with paid Cloudflare Images storage and Cloudflare Stream enabled is also required. Hosted Images accepts files up to 10 MiB; supported inputs are JPEG, PNG, GIF, WebP, SVG, and HEIC. AVIF input requires Enterprise. The public Worker route returns a metadata-stripped WebP display image capped at 4096 px and generates 600 px WebP thumbnails through the Images binding; the raw Hosted Image source is administrator-only. Account-level delivery variants are not used. Stream is billed by [minutes stored and minutes delivered](https://developers.cloudflare.com/stream/pricing/).
 
-Create a `.env` file and configure environment variables.
-
-Below is a **minimal configuration** example. For complete configuration options, see [Configuration Guide](https://chronoframe.bh8.ga/guide/configuration.html):
-
-```bash
-# Admin email (required)
-CFRAME_ADMIN_EMAIL=
-# Admin username (optional, default Chronoframe)
-CFRAME_ADMIN_NAME=
-# Admin password (optional, default CF1234@!)
-CFRAME_ADMIN_PASSWORD=
-
-# Site metadata (all optional)
-NUXT_PUBLIC_APP_TITLE=
-NUXT_PUBLIC_APP_SLOGAN=
-NUXT_PUBLIC_APP_AUTHOR=
-NUXT_PUBLIC_APP_AVATAR_URL=
-
-# Map provider (maplibre/mapbox)
-NUXT_PUBLIC_MAP_PROVIDER=maplibre
-# MapTiler access token for MapLibre
-NUXT_PUBLIC_MAP_MAPLIBRE_TOKEN=
-# Mapbox access token for Mapbox
-NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
-
-# Mapbox unrestricted token (optional, reverse geocoding)
-NUXT_MAPBOX_ACCESS_TOKEN=
-
-# Storage provider (local, s3 or openlist)
-NUXT_STORAGE_PROVIDER=local
-NUXT_PROVIDER_LOCAL_PATH=/app/data/storage
-
-# Session password (32‑char random string, required)
-NUXT_SESSION_PASSWORD=
-```
-
-### Pull Image
-
-Use the published image on GitHub Container Registry and Docker Hub. Choose the source that works best for your network:
-
-#### [GitHub Container Registry (GHCR)](https://github.com/HoshinoSuzumi/chronoframe/pkgs/container/chronoframe)
+For videos, the Worker uses the `STREAM` binding to create a one-time Direct Creator Upload URL, the browser sends a multipart POST directly to Stream, and playback uses HLS after processing. Cloudflare's binding supports this basic POST flow for files under 200 MB; ChronoFrame therefore defaults to `199999999` bytes. The default maximum duration is 600 seconds. No Stream API token is exposed to the app or browser.
 
 ```bash
-docker pull ghcr.io/hoshinosuzumi/chronoframe:latest
+pnpm install
+pnpm exec wrangler login
+
+# Create D1 and copy the returned database_id into wrangler.jsonc.
+pnpm d1:create
+
+# Create the R2 bucket named by wrangler.jsonc.
+pnpm exec wrangler r2 bucket create chronoframe-media
+
+# Enable Cloudflare Stream in the dashboard; STREAM uses a binding, not an app token.
+
+# Store two independent random values for the first deployment.
+pnpm exec wrangler secret put NUXT_SESSION_PASSWORD
+pnpm exec wrangler secret put CFRAME_BOOTSTRAP_TOKEN
+
+# Build, apply pending D1 migrations, and deploy.
+pnpm run deploy
+
+# Register the Stream webhook with the deployed URL, then store its result.secret.
+pnpm exec wrangler secret put CFRAME_STREAM_WEBHOOK_SECRET
 ```
 
-#### [Docker Hub](https://hub.docker.com/r/hoshinosuzumi/chronoframe)
+The bindings in `wrangler.jsonc` must remain `DB`, `IMAGES`, `STREAM`, `MEDIA_BUCKET`, and `ASSETS`. See the [Workers deployment guide](./docs/guide/getting-started.md) for resource setup, local development, CI, limits, and custom domains.
 
-```bash
-docker pull hoshinosuzumi/chronoframe:latest
-```
-
-### Docker
-
-Run with customized environment variables:
-
-```bash
-docker run -d --name chronoframe -p 3000:3000 -v $(pwd)/data:/app/data --env-file .env ghcr.io/hoshinosuzumi/chronoframe:latest
-```
-
-### Docker Compose
-
-Create docker-compose.yml:
-
-```yaml
-services:
-  chronoframe:
-    image: ghcr.io/hoshinosuzumi/chronoframe:latest
-    container_name: chronoframe
-    restart: unless-stopped
-    ports:
-      - '3000:3000'
-    volumes:
-      - ./data:/app/data
-    env_file:
-      - .env
-```
-
-Start:
-
-```bash
-docker compose up -d
-```
+The current branch no longer contains the legacy Docker build, Compose stack, or image-publishing workflow because they cannot provide the required Worker bindings. For migration reference, inspect a release or Git tag from the pre-Workers line.
 
 ## 📖 User Guide
 
-> If `CFRAME_ADMIN_EMAIL` and `CFRAME_ADMIN_PASSWORD` are not set, the default admin account is:
->
-> - Email: `admin@chronoframe.com`
-> - Password: `CF1234@!`
+On first launch, open the onboarding wizard and create the administrator account.
+The wizard requires the `CFRAME_BOOTSTRAP_TOKEN`; ChronoFrame has no default
+administrator password.
 
 ### Logging into the Dashboard
 
@@ -157,7 +104,7 @@ docker compose up -d
 
 1. Go to the dashboard at /dashboard
 2. On the Photos page, select and upload images (supports batch & drag-and-drop)
-3. System will automatically parse EXIF data, generate thumbnails, and perform reverse geocoding
+3. The Worker stores images in Hosted Images, sends videos directly from the browser to Stream, and reserves R2 for other object types
 
 ## 📸 Screenshots
 
@@ -170,8 +117,9 @@ docker compose up -d
 
 ### Requirements
 
-- Node.js 18+
-- pnpm 9.0+
+- Node.js 22.12+
+- pnpm 10+
+- A Cloudflare account with D1, R2, Workers, paid Images storage, and Stream enabled
 
 ### Install dependencies
 
@@ -184,26 +132,18 @@ npm install
 yarn install
 ```
 
-### Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
 ### Initialize database
 
 ```bash
-# 2. Generate migration files (optional)
-pnpm db:generate
-
-# 3. Run database migrations
-pnpm db:migrate
+# Generate Worker binding types and initialize local D1.
+pnpm cf:typegen
+pnpm d1:migrate:local
 ```
 
 ### Start development server
 
 ```bash
-pnpm dev
+pnpm dev:worker
 ```
 
 App will start at http://localhost:3000.
@@ -229,21 +169,22 @@ chronoframe/
 ### Build commands
 
 ```bash
-# Development (with dependencies build)
-pnpm dev
+# Local Worker runtime; Stream E2E checks require an account-backed preview
+pnpm dev:worker
 
 # Build only dependencies
 pnpm build:deps
 
-# Production build
-pnpm build
+# Production Worker build
+pnpm build:worker
 
 # Database operations
-pnpm db:generate    # Generate migration files
-pnpm db:migrate     # Run migrations
+pnpm d1:generate          # Generate migration files
+pnpm d1:migrate:local     # Apply migrations locally
+pnpm d1:migrate:remote    # Apply migrations to production
 
-# Preview production build
-pnpm preview
+# Deploy to Cloudflare Workers
+pnpm run deploy
 ```
 
 ## 🤝 Contributing
@@ -280,25 +221,25 @@ This project is licensed under the MIT License.
 <details>
   <summary>How is the admin user created?</summary>
   <p>
-    On first startup, an admin user is created based on <code>CFRAME_ADMIN_EMAIL</code>, <code>CFRAME_ADMIN_NAME</code>, and <code>CFRAME_ADMIN_PASSWORD</code>. The email must match your GitHub account email used for login.
+    Open the first-run onboarding wizard, authenticate it with the <code>CFRAME_BOOTSTRAP_TOKEN</code>, and choose the administrator email, display name, and password. ChronoFrame never ships a default administrator credential.
   </p>
 </details>
 <details>
   <summary>Which image formats are supported?</summary>
   <p>
-    Supported formats: JPEG, PNG, HEIC/HEIF, MOV (for Live Photos).
+    Hosted Images accepts JPEG, PNG, GIF, WebP, SVG, and HEIC, up to 10 MiB per image. AVIF input requires Cloudflare Enterprise. Every supported video upload, including Live/Motion Photo companions, is stored and delivered by Cloudflare Stream.
   </p>
 </details>
 <details>
-  <summary>Why can’t I use GitHub/Local storage?</summary>
+  <summary>Can I use S3, local, OpenList, or GitHub storage?</summary>
   <p>
-    Currently only S3-compatible storage is supported. GitHub and local storage support is planned.
+    The Workers version has fixed bindings: images use Hosted Images, videos use Stream, other objects use R2, and records use D1. The earlier storage providers are available only in legacy container releases and Git tags.
   </p>
 </details>
 <details>
   <summary>Why is a map service required and how to configure it?</summary>
   <p>
-    The map is used to browse photo locations and render mini-maps in photo details. Currently Mapbox is used. After registering, <a href="https://console.mapbox.com/account/access-tokens/">get an access token</a> and set it to the <code>MAPBOX_TOKEN</code> variable.
+    The map is used to browse photo locations and render mini-maps in photo details. Configure MapLibre or Mapbox with the corresponding <code>NUXT_PUBLIC_*</code> variables in the configuration guide.
   </p>
 </details>
 <details>
@@ -310,7 +251,7 @@ This project is licensed under the MIT License.
 <details>
   <summary>How do I import existing photos from storage?</summary>
   <p>
-    Direct import of existing photos is not yet supported. A directory scanning import feature is planned.
+    There is no automatic scanner/importer. Follow the <a href="./docs/guide/migrate-to-workers.md">migration checklist</a> to transform SQLite records and move Images, Stream, and R2 objects explicitly.
   </p>
 </details>
 

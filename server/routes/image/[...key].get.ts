@@ -1,15 +1,25 @@
+import {
+  requireReadableHostedImage,
+  throwImageNotFound,
+} from '../../utils/media-access'
+import { imageDisplayPath } from '../../utils/photo-response'
+
+/** Legacy image URLs now resolve to the ACL-checked display representation. */
 export default eventHandler(async (event) => {
-  const { storageProvider } = useStorageProvider(event)
-  const key = getRouterParam(event, 'key')
+  const rawImageId = getRouterParam(event, 'key')
+  if (!rawImageId) throwImageNotFound()
 
-  if (!key) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid key' })
+  let imageId: string
+  try {
+    imageId = decodeURIComponent(rawImageId)
+  } catch {
+    throwImageNotFound()
   }
 
-  const photo = await storageProvider.get(key)
-  if (!photo) {
-    throw createError({ statusCode: 404, statusMessage: 'Photo not found' })
-  }
-  logger.chrono.info('Serve image from key', key)
-  return photo
+  const resolved = await requireReadableHostedImage(event, imageId)
+  setResponseHeaders(event, {
+    'Cache-Control': 'private, no-store, max-age=0',
+    Vary: 'Cookie',
+  })
+  return sendRedirect(event, imageDisplayPath(resolved.photo.id), 307)
 })

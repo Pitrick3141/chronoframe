@@ -1,78 +1,65 @@
 # Configuration Reference
 
-Whether using Docker or Docker Compose (.env) deployment, configuration is done through environment variables.
+Cloudflare resources are configured as bindings in `wrangler.jsonc`. Runtime secrets are stored with `wrangler secret put`; non-sensitive Nuxt values may be provided as Worker variables or build environment variables.
 
-## Environment Variables List
+## Required bindings and secret
 
-| Environment Variable                     | Description                                                     | Default                               | Required                                             |
-| ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------- |
-| CFRAME_ADMIN_EMAIL                       | Initial admin user email                                        | `admin@chronoframe.com`               | Yes                                                  |
-| CFRAME_ADMIN_NAME                        | Initial admin username                                          | `Chronoframe`                         | No                                                   |
-| CFRAME_ADMIN_PASSWORD                    | Initial admin user password                                     | `CF1234@!`                            | No                                                   |
-| NUXT_PUBLIC_APP_TITLE                    | Application title                                               | `ChronoFrame`                         | No                                                   |
-| NUXT_PUBLIC_APP_SLOGAN                   | Application slogan                                              | None                                  | No                                                   |
-| NUXT_PUBLIC_APP_AUTHOR                   | Application author                                              | None                                  | No                                                   |
-| NUXT_PUBLIC_APP_AVATAR_URL               | Application avatar URL                                          | None                                  | No                                                   |
-| NUXT_PUBLIC_COLOR_MODE_PREFERENCE        | Color mode preference, options: `light`, `dark`, `system`       | `system`                              | No                                                   |
-| NUXT_PUBLIC_MAP_PROVIDER                 | Map provider, options: `mapbox`, `maplibre`                     | `maplibre`                            | No                                                   |
-| NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN          | Mapbox access token (URL restricted), for map services          | None                                  | Required when `NUXT_PUBLIC_MAP_PROVIDER` is `mapbox` |
-| NUXT_NOMINATIM_BASE_URL                  | Nominatim base URL for reverse geocoding service                | `https://nominatim.openstreetmap.org` | No                                                   |
-| NUXT_MAPBOX_ACCESS_TOKEN                 | Mapbox access token (no URL restriction), for location services | None                                  | No                                                   |
-| NUXT_STORAGE_PROVIDER                    | Storage provider, supports `local`, `s3`, `openlist`            | `local`                               | Yes                                                  |
-| NUXT_PROVIDER_LOCAL_PATH                 | Local storage path                                              | `/app/data/storage`                   | No                                                   |
-| NUXT_PROVIDER_LOCAL_BASE_URL             | Local storage access URL                                        | `/storage`                            | No                                                   |
-| NUXT_PROVIDER_S3_ENDPOINT                | S3 compatible storage service endpoint                          | None                                  | Required when `NUXT_STORAGE_PROVIDER` is `s3`        |
-| NUXT_PROVIDER_S3_BUCKET                  | S3 bucket name                                                  | `chronoframe`                         | Required when `NUXT_STORAGE_PROVIDER` is `s3`        |
-| NUXT_PROVIDER_S3_REGION                  | S3 bucket region                                                | `auto`                                | Required when `NUXT_STORAGE_PROVIDER` is `s3`        |
-| NUXT_PROVIDER_S3_ACCESS_KEY_ID           | S3 access key ID                                                | None                                  | Required when `NUXT_STORAGE_PROVIDER` is `s3`        |
-| NUXT_PROVIDER_S3_SECRET_ACCESS_KEY       | S3 secret access key                                            | None                                  | Required when `NUXT_STORAGE_PROVIDER` is `s3`        |
-| NUXT_PROVIDER_S3_PREFIX                  | S3 storage prefix                                               | `photos/`                             | No                                                   |
-| NUXT_PROVIDER_S3_CDN_URL                 | S3 storage CDN URL                                              | None                                  | No                                                   |
-| NUXT_PROVIDER_OPENLIST_BASE_URL          | OpenList server URL                                             | None                                  | Required when `NUXT_STORAGE_PROVIDER` is `openlist`  |
-| NUXT_PROVIDER_OPENLIST_ROOT_PATH         | OpenList root path                                              | None                                  | Required when `NUXT_STORAGE_PROVIDER` is `openlist`  |
-| NUXT_PROVIDER_OPENLIST_TOKEN             | OpenList API token                                              | None                                  | Recommended (for OpenList authentication)            |
-| NUXT_PROVIDER_OPENLIST_ENDPOINT_UPLOAD   | OpenList upload endpoint                                        | `/api/fs/put`                         | No                                                   |
-| NUXT_PROVIDER_OPENLIST_ENDPOINT_DOWNLOAD | OpenList download endpoint                                      | None                                  | No                                                   |
-| NUXT_PROVIDER_OPENLIST_ENDPOINT_LIST     | OpenList list endpoint                                          | None                                  | No                                                   |
-| NUXT_PROVIDER_OPENLIST_ENDPOINT_DELETE   | OpenList delete endpoint                                        | `/api/fs/remove`                      | No                                                   |
-| NUXT_PROVIDER_OPENLIST_ENDPOINT_META     | OpenList metadata endpoint                                      | `/api/fs/get`                         | No                                                   |
-| NUXT_PROVIDER_OPENLIST_PATH_FIELD        | OpenList path field name                                        | `path`                                | No                                                   |
-| NUXT_PROVIDER_OPENLIST_CDN_URL           | OpenList CDN URL                                                | None                                  | No                                                   |
-| NUXT_PUBLIC_OAUTH_GITHUB_ENABLED         | Enable GitHub OAuth login                                       | `false`                               | No                                                   |
-| NUXT_OAUTH_GITHUB_CLIENT_ID              | GitHub OAuth app Client ID                                      | None                                  | No (optional, for GitHub login)                      |
-| NUXT_OAUTH_GITHUB_CLIENT_SECRET          | GitHub OAuth app Client Secret                                  | None                                  | No (optional, for GitHub login)                      |
-| NUXT_SESSION_PASSWORD                    | Password for encrypting sessions, 32-character random string    | None                                  | Yes                                                  |
-| NUXT_PUBLIC_GTAG_ID                      | Google Analytics Tracking ID                                    | None                                  | No                                                   |
-| NUXT_PUBLIC_ANALYTICS_MATOMO_ENABLED     | Enable Matomo analytics tracking                                | `false`                               | No                                                   |
-| NUXT_PUBLIC_ANALYTICS_MATOMO_URL         | Matomo instance URL (e.g., https://matomo.example.com)          | None                                  | No (required when Matomo is enabled)                 |
-| NUXT_PUBLIC_ANALYTICS_MATOMO_SITE_ID     | Matomo site ID                                                  | None                                  | No (required when Matomo is enabled)                 |
-| NUXT_UPLOAD_MIME_WHITELIST_ENABLED       | Enable MIME type whitelist validation for uploads               | `true`                                | No                                                   |
-| NUXT_UPLOAD_MIME_WHITELIST               | Allowed MIME types for uploads (comma-separated)                | See below                             | No                                                   |
-| ALLOW_INSECURE_COOKIE                    | Allow insecure cookies (only for development environment)       | `false`                               | No                                                   |
+| Name                           | Kind                   | Required | Purpose                                                                         |
+| ------------------------------ | ---------------------- | -------- | ------------------------------------------------------------------------------- |
+| `DB`                           | D1 binding             | Yes      | Relational data                                                                 |
+| `IMAGES`                       | Images binding         | Yes      | Hosted Images                                                                   |
+| `STREAM`                       | Stream binding         | Yes      | All video storage, processing, and HLS delivery                                 |
+| `MEDIA_BUCKET`                 | R2 binding             | Yes      | Other non-image, non-video objects                                              |
+| `ASSETS`                       | Workers Assets binding | Yes      | Nuxt client assets                                                              |
+| `NUXT_SESSION_PASSWORD`        | Worker secret          | Yes      | Session encryption; at least 32 random characters                               |
+| `CFRAME_BOOTSTRAP_TOKEN`       | Worker secret          | Yes      | Authorizes first-run onboarding; at least 32 random characters                  |
+| `CFRAME_STREAM_WEBHOOK_SECRET` | Worker secret          | Yes      | Verifies Stream `Webhook-Signature`; use the subscription API's `result.secret` |
 
-## Upload File Type Whitelist
+Set secrets with `pnpm exec wrangler secret put <NAME>`. Generate independent session/bootstrap values, but copy the Stream webhook secret from Cloudflare exactly. Never commit secrets or put them in `wrangler.jsonc`.
 
-The default value of `NUXT_UPLOAD_MIME_WHITELIST` includes the following MIME types:
+## Application variables
 
-- `image/jpeg` - JPEG images
-- `image/png` - PNG images
-- `image/webp` - WebP images
-- `image/gif` - GIF images
-- `image/bmp` - BMP images
-- `image/tiff` - TIFF images
-- `image/heic` - HEIC images (Apple)
-- `image/heif` - HEIF images
-- `video/quicktime` - QuickTime videos (MOV)
-- `video/mp4` - MP4 videos
+| Variable                               | Description                     | Default                               |
+| -------------------------------------- | ------------------------------- | ------------------------------------- |
+| `NUXT_PUBLIC_APP_TITLE`                | Site title                      | `ChronoFrame`                         |
+| `NUXT_PUBLIC_APP_SLOGAN`               | Site slogan                     | Empty                                 |
+| `NUXT_PUBLIC_APP_AUTHOR`               | Site author                     | Empty                                 |
+| `NUXT_PUBLIC_APP_AVATAR_URL`           | Site avatar URL                 | Empty                                 |
+| `NUXT_PUBLIC_MAP_PROVIDER`             | `mapbox` or `maplibre`          | `maplibre`                            |
+| `NUXT_PUBLIC_MAP_MAPLIBRE_STYLE`       | MapLibre style URL              | Empty                                 |
+| `NUXT_PUBLIC_MAP_MAPBOX_STYLE`         | Mapbox style URL                | Empty                                 |
+| `NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN`      | Browser-safe Mapbox token       | Empty                                 |
+| `NUXT_MAPBOX_ACCESS_TOKEN`             | Server-side Mapbox token        | Empty                                 |
+| `NUXT_NOMINATIM_BASE_URL`              | Reverse-geocoding API base URL  | `https://nominatim.openstreetmap.org` |
+| `NUXT_PUBLIC_OAUTH_GITHUB_ENABLED`     | Enable GitHub OAuth             | `false`                               |
+| `NUXT_OAUTH_GITHUB_CLIENT_ID`          | GitHub OAuth client ID          | Empty                                 |
+| `NUXT_OAUTH_GITHUB_CLIENT_SECRET`      | GitHub OAuth client secret      | Empty                                 |
+| `NUXT_PUBLIC_GTAG_ID`                  | Google Analytics measurement ID | Empty                                 |
+| `NUXT_PUBLIC_ANALYTICS_MATOMO_ENABLED` | Enable Matomo                   | `false`                               |
+| `NUXT_PUBLIC_ANALYTICS_MATOMO_URL`     | Matomo URL                      | Empty                                 |
+| `NUXT_PUBLIC_ANALYTICS_MATOMO_SITE_ID` | Matomo site ID                  | Empty                                 |
 
-To customize the whitelist, use a comma-separated string of MIME types, for example:
+Administrator passwords are submitted only during onboarding and stored as password hashes in D1; they are not Wrangler secrets. Treat server-side map tokens, OAuth client secrets, and other server-only credentials as Worker secrets even when optional.
 
-```
-NUXT_UPLOAD_MIME_WHITELIST=image/jpeg,image/png,video/mp4
+## Upload configuration
+
+| Variable                                         | Description                                                         | Default                             |
+| ------------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------- |
+| `NUXT_PUBLIC_CLOUDFLARE_IMAGES_MAX_UPLOAD_BYTES` | UI ceiling for Hosted Images                                        | `10485760` (10 MiB)                 |
+| `NUXT_PUBLIC_CLOUDFLARE_STREAM_MAX_UPLOAD_BYTES` | Application ceiling for Stream video uploads                        | `199999999` (strictly under 200 MB) |
+| `NUXT_CLOUDFLARE_STREAM_MAX_DURATION_SECONDS`    | Maximum video duration reserved for Direct Creator Upload           | `600`                               |
+| `NUXT_PUBLIC_CLOUDFLARE_R2_MAX_OBJECT_BYTES`     | Application ceiling for raw R2 uploads that pass through the Worker | `100000000` (100 MB)                |
+| `NUXT_UPLOAD_MIME_WHITELIST_ENABLED`             | Validate upload MIME types                                          | `true`                              |
+| `NUXT_UPLOAD_MIME_WHITELIST`                     | Comma-separated accepted MIME types                                 | See below                           |
+
+Default whitelist:
+
+```dotenv
+NUXT_UPLOAD_MIME_WHITELIST=image/jpeg,image/png,image/webp,image/gif,image/svg+xml,image/heic,image/heif,video/quicktime,video/mp4
 ```
 
-To disable whitelist validation (allow any file type), set:
+Disabling the application whitelist does not bypass service limits. Unsupported image formats and images larger than 10 MiB are still rejected by Hosted Images. Supported videos are sent directly to Stream and played through HLS; the binding's basic POST upload requires files under 200 MB. R2 is only for other non-image, non-video objects.
 
-```
-NUXT_UPLOAD_MIME_WHITELIST_ENABLED=false
-```
+`STREAM` is a capability binding and needs no application token or additional CI secret. Stream usage is billed by stored and delivered video minutes.
+
+Storage-provider variables from the Node/Docker line (`NUXT_STORAGE_PROVIDER`, `NUXT_PROVIDER_S3_*`, `NUXT_PROVIDER_LOCAL_*`, and `NUXT_PROVIDER_OPENLIST_*`) are obsolete. See [Cloudflare Storage Bindings](/configuration/storage-providers).

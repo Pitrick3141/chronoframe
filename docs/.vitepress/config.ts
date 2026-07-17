@@ -44,6 +44,10 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
+          {
+            text: 'Migrate to Workers',
+            link: '/guide/migrate-to-workers',
+          },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Update Guide', link: '/guide/updates' },
         ],

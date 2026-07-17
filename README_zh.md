@@ -6,10 +6,10 @@
 
 <p align="center">
   <a href="https://github.com/HoshinoSuzumi/chronoframe/releases/latest">
-    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe/stable?icon=docker&label=稳定" alt="Latest Release">
+    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe/stable?label=稳定" alt="Latest Release">
   </a>
   <a href="https://github.com/HoshinoSuzumi/chronoframe/releases?q=beta&expanded=false">
-    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe?icon=docker&label=测试" alt="Latest Nightly Release">
+    <img src="https://badgen.net/github/release/HoshinoSuzumi/chronoframe?label=测试" alt="Latest Nightly Release">
   </a>
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -37,10 +37,10 @@
 
 - **在线管理照片** - 通过 Web 界面轻松管理和浏览照片
 - **探索地图** - 在地图上浏览照片拍摄位置
-- **智能 EXIF 解析** - 自动提取拍摄时间、地理位置、相机参数等元数据
+- **照片元数据** - 保留受支持的拍摄时间、地理位置和相机信息
 - **地理位置识别** - 自动识别(Reverse Geocoding)照片拍摄地点
 - **多格式支持** - 支持 JPEG、PNG、HEIC/HEIF 等主流图片格式
-- **智能缩略图** - 基于 ThumbHash 技术的高效缩略图生成
+- **Cloudflare 交付** - 在边缘返回剥离元数据的 WebP 展示图并动态生成 WebP 缩略图
 
 ### 🔧 现代技术栈
 
@@ -49,105 +49,51 @@
 - **TailwindCSS** - 现代化的 CSS 框架
 - **Drizzle ORM** - 类型安全的数据库 ORM
 
-### ☁️ 灵活的存储方案
+### ☁️ Cloudflare 原生存储
 
-- **多存储后端** - 支持 S3 兼容存储、本地文件系统
-- **CDN 加速** - 可配置 CDN 地址加速图片访问
+- **D1** 通过 `DB` 绑定存储应用与照片元数据。
+- **Cloudflare Images Hosted Images** 通过 `IMAGES` 保存全部图片。
+- **Cloudflare Stream** 通过 `STREAM` 保存并传输全部视频。
+- **R2** 通过 `MEDIA_BUCKET` 保存其他非图片、非视频对象。
+- **Workers Assets** 通过 `ASSETS` 提供构建后的 Nuxt 客户端资源。
 
-## 🐳 部署
+## ☁️ 部署到 Cloudflare Workers
 
-推荐使用预构建的 docker 镜像部署，[在 ghcr 上查看镜像](https://github.com/HoshinoSuzumi/chronoframe/pkgs/container/chronoframe)
+ChronoFrame 现在仅支持 Cloudflare Workers 运行环境。当前压缩 bundle 超过 Workers Free 的 3 MB 脚本上限，因此需要 Workers Paid 计划；还需启用 Cloudflare Images 付费存储计划与 Cloudflare Stream。Hosted Images 单图上限为 10 MiB；支持 JPEG、PNG、GIF、WebP、SVG 与 HEIC，AVIF 输入仅限 Enterprise。公开 Worker 路由通过 Images binding 返回最长边不超过 4096 px、已剥离元数据的 WebP 展示图，并生成 600 px WebP 缩略图；Hosted Image 原始源文件仅管理员可访问，应用不使用账户级交付变体。Stream 按[视频存储分钟和传输分钟](https://developers.cloudflare.com/stream/pricing/)计费。
 
-创建 `.env` 文件并配置。
-
-下面是**最小化配置**示例，完整的配置项参考 [配置指南](https://chronoframe.bh8.ga/zh/guide/configuration.html)：
-
-```bash
-# 管理员邮箱（必须）
-CFRAME_ADMIN_EMAIL=
-# 管理员用户名（可选，默认 ChronoFrame）
-CFRAME_ADMIN_NAME=
-# 管理员密码（可选，默认 CF1234@!）
-CFRAME_ADMIN_PASSWORD=
-
-# 站点信息（均可选）
-NUXT_PUBLIC_APP_TITLE=
-NUXT_PUBLIC_APP_SLOGAN=
-NUXT_PUBLIC_APP_AUTHOR=
-NUXT_PUBLIC_APP_AVATAR_URL=
-
-# 地图提供器 (maplibre/mapbox)
-NUXT_PUBLIC_MAP_PROVIDER=maplibre
-# 使用 MapLibre 需要 MapTiler 访问令牌
-NUXT_PUBLIC_MAP_MAPLIBRE_TOKEN=
-# 使用 Mapbox 需要 Mapbox 访问令牌
-NUXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
-
-# Mapbox 无域名限制令牌（反向地理编码，可选）
-NUXT_MAPBOX_ACCESS_TOKEN=
-
-# 存储提供者（local、s3 或 openlist）
-NUXT_STORAGE_PROVIDER=local
-NUXT_PROVIDER_LOCAL_PATH=/app/data/storage
-
-# 会话密码（必须，32 位随机字符串）
-NUXT_SESSION_PASSWORD=
-```
-
-### 拉取镜像
-
-我们推荐使用预构建的 Docker 镜像进行部署，镜像托管在 GHCR 和 Docker Hub，您可以根据网络情况选择合适的源。
-
-#### [GitHub Container Registry (GHCR)](https://github.com/HoshinoSuzumi/chronoframe/pkgs/container/chronoframe)
+视频上传时，Worker 使用 `STREAM` binding 创建一次性的 Direct Creator Upload URL，浏览器将 multipart POST 直接发送到 Stream，处理完成后通过 HLS 播放。Cloudflare binding 的 basic POST 流程要求文件小于 200 MB；ChronoFrame 因此默认限制为 `199999999` 字节。默认最大时长为 600 秒，应用和浏览器都不需要接触 Stream API Token。
 
 ```bash
-docker pull ghcr.io/hoshinosuzumi/chronoframe:latest
+pnpm install
+pnpm exec wrangler login
+
+# 创建 D1，并将返回的 database_id 填入 wrangler.jsonc。
+pnpm d1:create
+
+# 创建 wrangler.jsonc 中声明的 R2 存储桶。
+pnpm exec wrangler r2 bucket create chronoframe-media
+
+# 在 Cloudflare 控制台启用 Stream；STREAM 使用 binding，无需应用 token。
+
+# 保存两个独立随机值并完成首次部署。
+pnpm exec wrangler secret put NUXT_SESSION_PASSWORD
+pnpm exec wrangler secret put CFRAME_BOOTSTRAP_TOKEN
+
+# 构建、应用尚未执行的 D1 migrations 并部署。
+pnpm run deploy
+
+# 用已部署 URL 注册 Stream webhook，再保存其 result.secret。
+pnpm exec wrangler secret put CFRAME_STREAM_WEBHOOK_SECRET
 ```
 
-#### [Docker Hub](https://hub.docker.com/r/hoshinosuzumi/chronoframe)
+`wrangler.jsonc` 中的绑定名必须保持为 `DB`、`IMAGES`、`STREAM`、`MEDIA_BUCKET` 与 `ASSETS`。资源创建、本地开发、CI、限制和自定义域名说明见 [Workers 部署指南](./docs/zh/guide/getting-started.md)。
 
-```bash
-docker pull hoshinosuzumi/chronoframe:latest
-```
-
-### Docker
-
-一行命令启动：
-
-```bash
-docker run -d --name chronoframe -p 3000:3000 -v $(pwd)/data:/app/data --env-file .env ghcr.io/hoshinosuzumi/chronoframe:latest
-```
-
-### Docker Compose
-
-创建 `docker-compose.yml`：
-
-```yaml
-services:
-  chronoframe:
-    image: ghcr.io/hoshinosuzumi/chronoframe:latest
-    container_name: chronoframe
-    restart: unless-stopped
-    ports:
-      - '3000:3000'
-    volumes:
-      - ./data:/app/data
-    env_file:
-      - .env
-```
-
-启动：
-
-```bash
-docker compose up -d
-```
+当前分支已移除旧 Docker 构建、Compose 配置与镜像发布 workflow，因为它们无法提供本版本要求的 Worker bindings。如需迁移参考，请查看迁移到 Workers 之前的 release 或 Git tag。
 
 ## 📖 使用指南
 
-> 如未配置 `CFRAME_ADMIN_EMAIL` 和 `CFRAME_ADMIN_PASSWORD`，默认账号如下：
->
-> - 邮箱: `admin@chronoframe.com`
-> - 密码: `CF1234@!`
+首次启动时，请打开初始化向导并创建管理员账号。向导要求提供
+`CFRAME_BOOTSTRAP_TOKEN`；ChronoFrame 不提供默认管理员密码。
 
 ### 登录到控制台
 
@@ -157,7 +103,7 @@ docker compose up -d
 
 1. 访问仪表板页面 `/dashboard`
 2. 在 `Photos` 页面中选择图片并点击上传（支持批量上传和拖拽上传）
-3. 系统将自动提取 EXIF 信息、生成缩略图并逆编码照片地理位置
+3. Worker 将图片保存到 Hosted Images，视频由浏览器直传 Stream，R2 只保存其他对象类型
 
 ## 📸 截图
 
@@ -170,8 +116,9 @@ docker compose up -d
 
 ### 环境要求
 
-- Node.js 18+
-- pnpm 9.0+
+- Node.js 22.12+
+- pnpm 10+
+- 已启用 D1、R2、Workers、Images 付费存储与 Stream 的 Cloudflare 账号
 
 ### 安装依赖
 
@@ -184,28 +131,18 @@ npm install
 yarn install
 ```
 
-### 配置环境变量
-
-复制环境变量模板并根据需要配置：
-
-```bash
-cp .env.example .env
-```
-
 ### 数据库初始化
 
 ```bash
-# 2. 生成数据库迁移文件(可选)
-pnpm db:generate
-
-# 3. 执行数据库迁移
-pnpm db:migrate
+# 生成 Worker 绑定类型并初始化本地 D1。
+pnpm cf:typegen
+pnpm d1:migrate:local
 ```
 
 ### 启动开发服务器
 
 ```bash
-pnpm dev
+pnpm dev:worker
 ```
 
 应用将在 `http://localhost:3000` 启动。
@@ -231,21 +168,22 @@ chronoframe/
 ### 构建命令
 
 ```bash
-# 开发模式 (包含依赖包构建)
-pnpm dev
+# 本地 Worker 环境；Stream E2E 需要连接账号的预览部署
+pnpm dev:worker
 
 # 仅构建依赖包
 pnpm build:deps
 
-# 构建生产版本
-pnpm build
+# 构建生产 Worker
+pnpm build:worker
 
 # 数据库操作
-pnpm db:generate    # 生成迁移文件
-pnpm db:migrate     # 执行迁移
+pnpm d1:generate          # 生成迁移文件
+pnpm d1:migrate:local     # 应用本地迁移
+pnpm d1:migrate:remote    # 应用生产迁移
 
-# 预览生产版本
-pnpm preview
+# 部署到 Cloudflare Workers
+pnpm run deploy
 ```
 
 ## 🤝 贡献
@@ -282,25 +220,25 @@ pnpm preview
 <details>
   <summary>如何创建管理员用户？</summary>
   <p>
-    首次启动时，会根据环境变量 <code>CFRAME_ADMIN_EMAIL</code>、<code>CFRAME_ADMIN_NAME</code> 和 <code>CFRAME_ADMIN_PASSWORD</code> 环境变量创建一个管理员用户。<code>CFRAME_ADMIN_EMAIL</code> 必须是登录使用的 GitHub 账户的邮箱。
+    打开首次启动向导，用 <code>CFRAME_BOOTSTRAP_TOKEN</code> 完成鉴权，然后自行设置管理员邮箱、显示名称和密码。ChronoFrame 不附带默认管理员凭据。
   </p>
 </details>
 <details>
   <summary>支持哪些图片格式？</summary>
   <p>
-    支持 JPEG、PNG、HEIC/HEIF、MOV(作为实况照片) 格式。
+    Hosted Images 支持 JPEG、PNG、GIF、WebP、SVG 与 HEIC，单图最多 10 MiB；AVIF 输入需要 Cloudflare Enterprise。所有受支持的视频上传（包括 Live/Motion Photo 伴侣）均由 Cloudflare Stream 保存和传输。
   </p>
 </details>
 <details>
-  <summary>为什么无法使用 GitHub/Local 存储？</summary>
+  <summary>能否使用 S3、本地、OpenList 或 GitHub 存储？</summary>
   <p>
-    目前支持 S3 兼容存储，未来计划支持 GitHub 和本地文件系统存储。
+    Workers 版本使用固定 bindings：图片使用 Hosted Images，视频使用 Stream，其他对象使用 R2，记录使用 D1。旧 storage provider 仅存在于历史容器版本和 Git tags 中。
   </p>
 </details>
 <details>
   <summary>为什么需要/如何配置地图服务？</summary>
   <p>
-    地图服务用于在地图上浏览照片拍摄位置，以及照片详情中的小地图渲染。目前使用 Mapbox，注册后<a href="https://console.mapbox.com/account/access-tokens/">获取访问令牌</a>并配置到 <code>MAPBOX_TOKEN</code> 环境变量中。
+    地图服务用于浏览照片位置和渲染详情页小地图。请按配置指南使用对应的 <code>NUXT_PUBLIC_*</code> 变量配置 MapLibre 或 Mapbox。
   </p>
 </details>
 <details>
@@ -314,7 +252,7 @@ pnpm preview
 <details>
   <summary>如何导入存储中已有的照片？</summary>
   <p>
-    目前不支持直接导入已有照片，未来计划支持通过指定目录扫描导入。
+    当前没有自动扫描/导入器。请按照<a href="./docs/zh/guide/migrate-to-workers.md">迁移清单</a>显式转换 SQLite 记录并迁移 Images、Stream 与 R2 对象。
   </p>
 </details>
 

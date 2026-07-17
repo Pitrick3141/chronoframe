@@ -27,6 +27,11 @@ const isLoadingAlbums = ref(false)
 const allPhotos = ref<Photo[]>([])
 const isLoadingPhotos = ref(false)
 
+const formatPhotoDate = (photo: Photo, format: string) => {
+  const date = photo.dateTaken || photo.lastModified
+  return date ? dayjs(date).format(format) : ''
+}
+
 const isAlbumSlideoverOpen = ref(false)
 const isDeleteConfirmOpen = ref(false)
 const isPhotoSelectorOpen = ref(false)
@@ -497,7 +502,12 @@ const columns = computed<any[]>(() => [
                 variant="soft"
                 color="neutral"
               >
-                {{ $t('dashboard.albums.photoCount', { count: (row.original as unknown as AlbumItem).photoCount || 0 }) }}
+                {{
+                  $t('dashboard.albums.photoCount', {
+                    count:
+                      (row.original as unknown as AlbumItem).photoCount || 0,
+                  })
+                }}
               </UBadge>
             </template>
 
@@ -1026,13 +1036,17 @@ const columns = computed<any[]>(() => [
                           <p
                             class="truncate text-[10px] font-medium text-white/92"
                           >
-                            {{ photo.title || photo.storageKey || $t('ui.photo.untitled') }}
+                            {{
+                              photo.title ||
+                              photo.storageKey ||
+                              $t('ui.photo.untitled')
+                            }}
                           </p>
                           <p class="truncate text-[9px] text-white/72">
                             {{
                               photo.city
-                                ? `${photo.city} · ${dayjs(photo.createdAt).format('MM-DD')}`
-                                : dayjs(photo.createdAt).format('YYYY-MM-DD')
+                                ? `${photo.city} · ${formatPhotoDate(photo, 'MM-DD')}`
+                                : formatPhotoDate(photo, 'YYYY-MM-DD')
                             }}
                           </p>
                         </div>

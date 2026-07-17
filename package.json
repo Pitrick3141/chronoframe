@@ -8,35 +8,40 @@
   "license": "MIT",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
-    "db": "drizzle-kit",
-    "db:push": "drizzle-kit push",
-    "db:pull": "drizzle-kit pull",
-    "db:studio": "drizzle-kit studio --port 3010",
-    "db:check": "drizzle-kit check",
-    "db:up": "drizzle-kit up",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "build": "NODE_OPTIONS=\"--max-old-space-size=8192\" nuxt build",
+    "d1:create": "wrangler d1 create chronoframe",
+    "d1:generate": "drizzle-kit generate",
+    "d1:migrate:local": "wrangler d1 migrations apply DB --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "d1:execute:local": "wrangler d1 execute DB --local",
+    "d1:execute:remote": "wrangler d1 execute DB --remote",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 nuxt build",
     "build:deps": "pnpm --filter @chronoframe/webgl-image build",
+    "build:worker": "pnpm run build:deps && pnpm run build",
     "dev": "run-p dev:dep dev:wait-only",
     "dev:dep": "pnpm --filter @chronoframe/webgl-image dev",
     "dev:only": "nuxt dev --host",
     "dev:wait-only": "wait-on packages/webgl-image/dist && nuxt dev --host",
+    "dev:worker": "pnpm run build:worker && wrangler dev",
+    "deploy": "pnpm run build:worker && pnpm run d1:migrate:remote && wrangler deploy",
+    "cf:typegen": "wrangler types",
+    "typecheck": "nuxt typecheck",
+    "typecheck:server": "tsc --noEmit -p .nuxt/tsconfig.server.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "generate": "nuxt generate",
-    "preview": "nuxt preview",
+    "preview": "pnpm run dev:worker",
     "postinstall": "nuxt prepare",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1065.0",
-    "@aws-sdk/s3-request-presigner": "^3.1065.0",
     "@chronoframe/webgl-image": "workspace:*",
     "@indoorequal/vue-maplibre-gl": "^8.4.2",
     "@nuxt/fonts": "0.14.0",
@@ -46,16 +51,15 @@
     "@pinia/nuxt": "^0.11.3",
     "@tailwindcss/vite": "^4.3.0",
     "@unhead/vue": "^2.1.15",
-    "@vingle/bmp-js": "^0.2.5",
+    "@vueuse/core": "^14.3.0",
     "@vueuse/nuxt": "14.3.0",
     "@yeger/vue-masonry-wall": "^6.1.1",
-    "better-sqlite3": "^12.10.0",
+    "consola": "^3.4.2",
     "dayjs-nuxt": "2.1.11",
     "drizzle-orm": "^0.45.2",
     "es-toolkit": "^1.47.0",
-    "exiftool-vendored": "^35.21.0",
     "file-type": "^22.0.1",
-    "heic-convert": "^2.1.0",
+    "hls.js": "^1.6.16",
     "maplibre-gl": "^5.24.0",
     "motion-v": "^2.3.0",
     "nuxt": "^4.4.8",
@@ -66,17 +70,13 @@
     "nuxt-og-image": "5.1.13",
     "pinia": "^3.0.4",
     "reka-ui": "^2.9.9",
-    "sharp": "^0.34.5",
     "swiper": "^12.2.0",
-    "systeminformation": "^5.31.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.0",
     "thumbhash": "^0.1.1",
     "tippy.js": "^6.3.7",
-    "unstorage": "^1.17.5",
     "vue": "^3.5.35",
     "vue-router": "^4.6.4",
-    "wait-on": "^9.0.10",
     "zod": "^4.4.3"
   },
   "packageManager": "pnpm@10.34.1",
@@ -91,11 +91,9 @@
     "@iconify-json/svg-spinners": "^1.2.4",
     "@iconify-json/tabler": "^1.2.35",
     "@nuxt/test-utils": "4.0.3",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/heic-convert": "^2.1.1",
-    "@vueuse/core": "^14.3.0",
+    "@types/node": "^24.0.0",
     "baseline-browser-mapping": "^2.10.35",
-    "consola": "^3.4.2",
+    "cross-env": "^10.1.0",
     "dayjs": "^1.11.21",
     "drizzle-kit": "^0.31.10",
     "mapbox-gl": "^3.24.0",
@@ -104,27 +102,9 @@
     "oxlint": "^1.69.0",
     "sass-embedded": "^1.100.0",
     "typescript": "^5.9.3",
-    "vitepress": "2.0.0-alpha.17"
-  },
-  "pnpm": {
-    "peerDependencyRules": {
-      "ignoreMissing": [
-        "@nuxt/kit"
-      ]
-    },
-    "overrides": {
-      "sharp": "0.34.5"
-    },
-    "ignoredBuiltDependencies": [
-      "@parcel/watcher",
-      "@tailwindcss/oxide",
-      "esbuild",
-      "unrs-resolver",
-      "vue-demi"
-    ],
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "sharp"
-    ]
+    "vitepress": "2.0.0-alpha.17",
+    "vue-tsc": "2.2.12",
+    "wait-on": "^9.0.10",
+    "wrangler": "^4.111.0"
   }
 }

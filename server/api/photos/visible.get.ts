@@ -1,34 +1,37 @@
-import { desc, notInArray } from 'drizzle-orm'
+import { and, desc, eq, notExists, or } from 'drizzle-orm'
+
+import { photosForClient } from '../../utils/photo-response'
 
 export default eventHandler(async (_event) => {
   const db = useDB()
 
-  // 获取所有隐藏相册中的照片ID
-  const hiddenAlbumPhotos = db
+  const hiddenAlbumPhoto = db
     .select({
       photoId: tables.albumPhotos.photoId,
     })
-    .from(tables.albumPhotos)
-    .innerJoin(tables.albums, eq(tables.albumPhotos.albumId, tables.albums.id))
-    .where(eq(tables.albums.isHidden, true))
-    .all()
+    .from(tables.albums)
+    .leftJoin(
+      tables.albumPhotos,
+      eq(tables.albumPhotos.albumId, tables.albums.id),
+    )
+    .where(
+      and(
+        eq(tables.albums.isHidden, true),
+        or(
+          eq(tables.albumPhotos.photoId, tables.photos.id),
+          eq(tables.albums.coverPhotoId, tables.photos.id),
+        ),
+      ),
+    )
 
-  const hiddenPhotoIds = hiddenAlbumPhotos.map((row) => row.photoId)
-
-  // 查询所有照片，排除隐藏相册中的照片
-  if (hiddenPhotoIds.length > 0) {
-    return db
-      .select()
-      .from(tables.photos)
-      .where(notInArray(tables.photos.id, hiddenPhotoIds))
-      .orderBy(desc(tables.photos.dateTaken))
-      .all()
-  }
-
-  // 如果没有隐藏的照片，直接返回所有照片
-  return db
+  // A correlated NOT EXISTS avoids materializing an unbounded ID list and
+  // stays below D1's bind-parameter limit.
+  const photos = await db
     .select()
     .from(tables.photos)
+    .where(notExists(hiddenAlbumPhoto))
     .orderBy(desc(tables.photos.dateTaken))
     .all()
+
+  return photosForClient(photos)
 })

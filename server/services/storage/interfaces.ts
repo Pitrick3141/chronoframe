@@ -1,4 +1,4 @@
-import type { StorageConfig } from '.'
+import type { StorageConfig } from '../../../shared/types/storage'
 
 export interface StorageObject {
   key: string
@@ -18,11 +18,11 @@ export interface StorageProvider {
   config?: StorageConfig
   create(
     key: string,
-    fileBuffer: Buffer,
+    fileBuffer: Uint8Array | ArrayBuffer,
     contentType?: string,
   ): Promise<StorageObject>
   delete(key: string): Promise<void>
-  get(key: string): Promise<Buffer | null>
+  get(key: string): Promise<Uint8Array | null>
   getPublicUrl(key: string): string
   getSignedUrl?(
     key: string,

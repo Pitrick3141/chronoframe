@@ -5,7 +5,7 @@ layout: home
 hero:
   name: 'ChronoFrame'
   text: 'Self-hosted Personal Gallery'
-  tagline: 'Manage photos online with multi-storage backends, LivePhoto, and globe view'
+  tagline: 'A Cloudflare-native personal gallery with Live Photo and map views'
   image:
     src: /logo.png
     alt: ChronoFrame
@@ -27,10 +27,10 @@ features:
     details: Easily manage and browse photos through web interface, view photo locations on map.
   - title: Simple Deployment
     icon: 🚀
-    details: Deploy with one command using Docker, no database required (based on SQLite3).
-  - title: Flexible Storage Solutions
+    details: Build and deploy the Nuxt application directly to Cloudflare Workers with Wrangler.
+  - title: Cloudflare-native Storage
     icon: 💾
-    details: Support multiple storage backends including S3-compatible storage and local filesystem.
+    details: Store records in D1, images in Hosted Images, videos in Stream, other objects in R2, and client files in Workers Assets.
   - title: Smart Geolocation
     icon: 🌍
     details: Automatically extract photo GPS information, use Mapbox for geocoding, display photo locations on map.
@@ -39,7 +39,7 @@ features:
     details: Perfect for desktop and mobile, support touch operations and gesture controls, native app-like experience.
   - title: Live/Motion Photo Support
     icon: 🎬
-    details: Full support for Apple LivePhoto format and Google-standard Motion Photo, automatically detect and process MOV video files, preserve dynamic photo effects.
+    details: Pair Apple Live Photo and Motion Photo videos, upload them directly to Cloudflare Stream, and play them over HLS.
 ---
 
 ## 🌍 Demo Sites

@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { computed } from 'vue'
 import { formatCameraInfo } from '~/utils/camera'
 
 const props = withDefaults(

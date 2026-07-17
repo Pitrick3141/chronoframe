@@ -1,66 +1,42 @@
 <script setup lang="ts">
-import { z } from 'zod'
-import type { ProviderOption } from '~/components/Wizard/ProviderSelector.vue'
-
 definePageMeta({
   layout: 'onboarding',
 })
 
 const router = useRouter()
 
-const {
-  fields,
-  state,
-  loading: fetchingSchema,
-  isFieldVisible,
-} = useWizardForm('storage')
-
-// Dynamic schema based on visible fields
-const schema = computed(() => {
-  const s: Record<string, any> = {}
-  fields.value.forEach((field) => {
-    if (!isFieldVisible(field)) return
-
-    // Basic validation based on UI config
-    let validator: z.ZodTypeAny
-
-    if (field.type === 'boolean' || field.ui.type === 'toggle') {
-      validator = z.boolean()
-    } else if (field.type === 'number') {
-      validator = z.number()
-      if (field.ui.required) {
-        validator = (validator as z.ZodString).min(
-          1,
-          `${field.label} is required`,
-        )
-      } else {
-        validator = (validator as z.ZodString).optional()
-      }
-    } else {
-      validator = z.string()
-      if (field.ui.required) {
-        validator = (validator as z.ZodString).min(
-          1,
-          `${field.label} is required`,
-        )
-      } else {
-        validator = (validator as z.ZodString).optional()
-      }
-    }
-
-    if (field.ui.type === 'number') {
-      // If we had number types, we'd handle them here
-      // validator = z.number()
-    }
-
-    s[field.key] = validator
-  })
-  return z.object(s)
-})
+const bindings = computed(() => [
+  {
+    key: 'd1',
+    icon: 'tabler:database',
+    title: $t('onboarding.storage.cloudflare.bindings.d1.title'),
+    description: $t('onboarding.storage.cloudflare.bindings.d1.description'),
+  },
+  {
+    key: 'images',
+    icon: 'tabler:photo',
+    title: $t('onboarding.storage.cloudflare.bindings.images.title'),
+    description: $t(
+      'onboarding.storage.cloudflare.bindings.images.description',
+    ),
+  },
+  {
+    key: 'stream',
+    icon: 'tabler:video',
+    title: $t('onboarding.storage.cloudflare.bindings.stream.title'),
+    description: $t(
+      'onboarding.storage.cloudflare.bindings.stream.description',
+    ),
+  },
+  {
+    key: 'r2',
+    icon: 'tabler:bucket',
+    title: $t('onboarding.storage.cloudflare.bindings.r2.title'),
+    description: $t('onboarding.storage.cloudflare.bindings.r2.description'),
+  },
+])
 
 function onSubmit() {
-  // Validation passed, data is already in the store via useWizardForm binding
-  // Transformation of storage config will happen in the final step
   router.push('/onboarding/map')
 }
 </script>
@@ -70,72 +46,59 @@ function onSubmit() {
     :title="$t('onboarding.storage.title')"
     :description="$t('onboarding.storage.description')"
   >
-    <div
-      v-if="fetchingSchema"
-      class="flex justify-center py-8"
+    <form
+      id="storage-form"
+      class="space-y-6"
+      @submit.prevent="onSubmit"
     >
-      <UIcon
-        name="tabler:loader"
-        class="animate-spin w-8 h-8 text-gray-400"
+      <UAlert
+        color="info"
+        variant="subtle"
+        icon="tabler:cloud-lock"
+        :title="$t('onboarding.storage.cloudflare.title')"
+        :description="$t('onboarding.storage.cloudflare.description')"
       />
-    </div>
 
-    <div
-      v-else
-      class="space-y-8"
-    >
-      <!-- Provider Selector (Custom Field) -->
-      <template
-        v-for="field in fields"
-        :key="field.key"
-      >
-        <WizardProviderSelector
-          v-if="field.key === 'provider' && field.ui.type === 'custom'"
-          v-model="state[field.key]"
-          :options="(field.ui.options as ProviderOption[]) || []"
-        />
-      </template>
-
-      <UForm
-        id="storage-form"
-        :state="state"
-        :schema="schema"
-        class="space-y-4"
-        @submit="onSubmit"
-      >
-        <template
-          v-for="field in fields"
-          :key="field.key"
+      <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <article
+          v-for="binding in bindings"
+          :key="binding.key"
+          class="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950"
         >
-          <!-- Skip provider field as it's rendered above -->
-          <WizardFormField
-            v-if="isFieldVisible(field) && field.key !== 'provider'"
-            :label="$t(field.label || '')"
-            :name="field.key"
-            :required="field.ui.required"
-            :help="$t(field.ui.help || '')"
+          <div class="flex items-start justify-between gap-3">
+            <div
+              class="flex size-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-950/50 dark:text-primary-400"
+            >
+              <UIcon
+                :name="binding.icon"
+                class="size-5"
+              />
+            </div>
+            <UBadge
+              color="success"
+              variant="subtle"
+              size="sm"
+              icon="tabler:circle-check-filled"
+            >
+              {{ $t('onboarding.storage.cloudflare.configured') }}
+            </UBadge>
+          </div>
+
+          <h3 class="mt-4 font-semibold text-neutral-900 dark:text-neutral-100">
+            {{ binding.title }}
+          </h3>
+          <p
+            class="mt-1 text-sm leading-6 text-neutral-600 dark:text-neutral-400"
           >
-            <WizardInput
-              v-if="field.ui.type === 'password'"
-              v-model="state[field.key]"
-              type="password"
-              :placeholder="$t(field.ui.placeholder || '')"
-            />
-            <WizardCheckbox
-              v-else-if="field.ui.type === 'toggle'"
-              v-model="state[field.key]"
-              :label="$t(field.label || '')"
-            />
-            <WizardInput
-              v-else
-              v-model="state[field.key]"
-              type="text"
-              :placeholder="$t(field.ui.placeholder || '')"
-            />
-          </WizardFormField>
-        </template>
-      </UForm>
-    </div>
+            {{ binding.description }}
+          </p>
+        </article>
+      </div>
+
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        {{ $t('onboarding.storage.cloudflare.noCredentials') }}
+      </p>
+    </form>
 
     <template #actions>
       <WizardButton
@@ -143,7 +106,6 @@ function onSubmit() {
         form="storage-form"
         color="primary"
         size="lg"
-        :disabled="fetchingSchema"
         trailing-icon="tabler:arrow-right"
       >
         {{ $t('onboarding.actions.next') }}

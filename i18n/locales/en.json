@@ -75,18 +75,18 @@
           "nativeShare": "Use System Share",
           "copyLink": "Copy Link",
           "copyImage": "Copy Image",
-          "downloadImage": "Download Original",
+          "downloadImage": "Download Display Image",
           "generateShareImage": "Generate Share Image",
           "shareUrl": "Share URL",
           "downloadOgImage": "Download Preview",
-          "downloadOriginal": "Download Original",
-          "downloadOriginalImage": "Download Original Image"
+          "downloadOriginal": "Download Display Image",
+          "downloadOriginalImage": "Download Display Image"
         },
         "success": {
           "linkCopied": "Link copied to clipboard",
           "imageCopied": "Image copied to clipboard",
           "ogImageDownloaded": "Preview image downloaded successfully",
-          "originalImageDownloaded": "Original image downloaded successfully"
+          "originalImageDownloaded": "Display image downloaded successfully"
         },
         "error": {
           "copyNotSupported": "Copy not supported in this browser",
@@ -94,7 +94,7 @@
           "nativeShareFailed": "Native share failed",
           "linkCopyFailed": "Failed to copy link",
           "ogImageDownloadFailed": "Failed to download preview image",
-          "originalImageDownloadFailed": "Failed to download original image"
+          "originalImageDownloadFailed": "Failed to download display image"
         },
         "ogImage": {
           "title": "Share Preview",
@@ -561,7 +561,7 @@
       },
       "uploader": {
         "label": "Drag and drop or click to select photos",
-        "description": "Supports JPEG, PNG, HEIC format photos, and MOV format Live Photo videos. Maximum file size: {maxSize}MB per file"
+        "description": "JPEG, PNG, and HEIC images use Hosted Images (up to {imageMaxSize} MiB each). MOV Live Photo videos use Cloudflare Stream (up to {videoMaxSize} MiB each)."
       },
       "toolbar": {
         "title": "Photo Management",
@@ -615,7 +615,7 @@
       "actions": {
         "reprocess": "Reprocess",
         "refreshLocation": "Re-fetch City",
-        "eraseLocationInfo": "Erase location info",
+        "eraseLocationInfo": "Clear ChronoFrame location metadata",
         "delete": "Delete",
         "editMetadata": "Edit Metadata",
         "previewPhoto": "Photo Preview"
@@ -623,7 +623,7 @@
       "selection": {
         "selected": "{count} / {total} rows selected",
         "batchReprocess": "Reprocess",
-        "batchEraseLocation": "Erase location info",
+        "batchEraseLocation": "Clear ChronoFrame location metadata",
         "batchDownload": "Download",
         "batchDelete": "Batch Delete"
       },
@@ -632,8 +632,8 @@
         "description": "Drag and drop or select files. Photos will be automatically processed and added to the library.",
         "options": {
           "eraseLocation": {
-            "label": "Erase location info on upload",
-            "description": "This upload can override the system default and be toggled on or off anytime."
+            "label": "Clear ChronoFrame location metadata on upload",
+            "description": "Clears GPS-derived fields stored by ChronoFrame. The original Hosted Images source is not rewritten and may still contain EXIF GPS."
           },
           "duplicateCheck": {
             "label": "Duplicate file strategy",
@@ -717,10 +717,10 @@
         "queueUnavailable": "Task queue is not available",
         "reverseGeocodeQueued": "Reverse geocoding task queued",
         "reverseGeocodeFailed": "Failed to queue reverse geocoding",
-        "eraseLocationQueued": "Erase location info task queued",
-        "eraseLocationFailed": "Failed to queue erase location info task",
-        "batchEraseLocationQueued": "Queued {count} erase-location task(s)",
-        "batchEraseLocationFailed": "Failed to queue batch erase-location tasks",
+        "eraseLocationQueued": "ChronoFrame location metadata clearing task queued",
+        "eraseLocationFailed": "Failed to queue location metadata clearing task",
+        "batchEraseLocationQueued": "Queued {count} location metadata clearing task(s)",
+        "batchEraseLocationFailed": "Failed to queue location metadata clearing tasks",
         "taskSubmitFailed": "Failed to submit task",
         "taskStatusCheckFailed": "Failed to check task status",
         "uploadFailed": "Upload failed"
@@ -729,11 +729,11 @@
         "noSelection": "Please select photos to upload",
         "fileValidationFailed": "File validation failed",
         "allFilesValidationFailed": "All files failed validation",
-        "allFilesTooLarge": "All {count} selected files exceed the maximum size limit ({maxSize}MB).",
-        "filesTooLargeSkipped": "Skipped {count} oversized file(s) (limit {maxSize}MB). Remaining files will continue uploading.",
+        "allFilesTooLarge": "All {count} selected files exceed their service limits (Hosted Images: {imageMaxSize} MiB; Stream videos: {videoMaxSize} MiB).",
+        "filesTooLargeSkipped": "Skipped {count} oversized file(s) (Hosted Images: {imageMaxSize} MiB; Stream videos: {videoMaxSize} MiB). Remaining files will continue uploading.",
         "filesUnsupportedSkipped": "Skipped {count} file(s) with unsupported formats. Remaining files will continue uploading.",
         "unsupportedFormat": "Unsupported file format: {type}. Please select JPEG, PNG, or HEIC photos, or MOV format Live Photo videos.",
-        "fileTooLarge": "File too large: {size}MB. Maximum supported: {maxSize}MB.",
+        "fileTooLarge": "File too large: {size} MiB. Maximum supported: {maxSize} MiB.",
         "uploadFailed": "Upload failed",
         "uploadNetworkError": "Network connection failed or CORS error. Please check network and storage configuration.",
         "uploadCorsError": "CORS request failed. Please check storage CORS configuration.",
@@ -943,6 +943,7 @@
             "opensuse": "openSUSE",
             "macos": "macOS",
             "docker": "Docker Container",
+            "cloudflare-workers": "Cloudflare Workers",
             "unknown": "Unknown System"
           }
         },
@@ -1028,9 +1029,13 @@
       "messages": {
         "noTasks": "No tasks found",
         "retrySuccess": "Task retry successful",
+        "retryPending": "Task retry accepted and still processing",
         "retryFailed": "Failed to retry task",
         "deleteSuccess": "Task deleted successfully",
         "batchRetrySuccess": "Batch retry successful",
+        "batchRetryPending": "Batch retry is still processing",
+        "batchRetryPartial": "Batch retry partially failed",
+        "batchRetryStatusDescription": "{completed} completed, {pending} processing, {failed} failed",
         "clearSuccess": "Clear completed",
         "operationFailed": "Operation failed",
         "clearSuccessDescription": "Cleared {count} tasks",
@@ -1216,12 +1221,12 @@
     "privacy": {
       "upload": {
         "autoEraseLocation": {
-          "label": "Automatically erase location info on upload",
-          "description": "Automatically remove EXIF GPS metadata and clear geolocation fields while processing uploaded photos",
-          "help": "When enabled, location erasure will run asynchronously in the processing queue"
+          "label": "Clear ChronoFrame location metadata on upload",
+          "description": "Clears GPS-derived EXIF values and geolocation fields stored in D1. It does not rewrite the original Hosted Images source file.",
+          "help": "The public display copy is re-encoded without source metadata, but an administrator downloading the source may still receive its original EXIF GPS data."
         }
       },
-      "sectionDescription": "Manage data privacy policies for photo uploads. It is recommended to enable location data removal on public sites."
+      "sectionDescription": "Manage location metadata exposed by ChronoFrame. Source-file EXIF must be scrubbed before upload when irreversible removal is required."
     },
     "storage": {
       "name": {
@@ -1340,7 +1345,45 @@
           "description": "Custom CDN URL for accessing images"
         }
       },
-      "sectionDescription": "Manage the default storage scheme and available storage providers. Settings on this page only affect subsequent file uploads.",
+      "sectionDescription": "Storage is provided by Cloudflare deployment bindings and is read-only at runtime.",
+      "cloudflare": {
+        "title": "Cloudflare storage architecture",
+        "description": "ChronoFrame uses D1, Hosted Images, Stream, and R2 bindings configured when the Worker is deployed.",
+        "refresh": "Refresh health",
+        "status": {
+          "checking": "Checking",
+          "healthy": "Healthy",
+          "degraded": "Degraded",
+          "missing": "Not configured",
+          "unavailable": "Unavailable"
+        },
+        "healthUnavailable": {
+          "title": "Storage health could not be checked",
+          "description": "The architecture below is still active. Refresh to retry the binding health check."
+        },
+        "readonly": {
+          "title": "Deployment-managed configuration",
+          "description": "Storage bindings and credentials cannot be changed here. Update the Worker's Cloudflare bindings and redeploy to change storage resources."
+        },
+        "bindings": {
+          "d1": {
+            "title": "D1 database",
+            "description": "Stores users, settings, albums, photo metadata, and processing state."
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "Stores image assets and serves optimized delivery variants. Image uploads are limited to 10 MiB by default."
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "Stores and delivers Live Photo videos. Basic uploads must be smaller than 200 MB."
+          },
+          "r2": {
+            "title": "R2 object storage",
+            "description": "Stores other non-image, non-video binary objects."
+          }
+        }
+      },
       "table": {
         "columns": {
           "name": "Storage Name",
@@ -1478,7 +1521,31 @@
     },
     "storage": {
       "title": "Storage",
-      "description": "Choose where your photos are stored"
+      "description": "Review the Cloudflare resources provisioned for ChronoFrame",
+      "cloudflare": {
+        "title": "Cloudflare storage bindings are configured",
+        "description": "Persistent data is routed to D1, Hosted Images, Stream, and R2 through bindings supplied when the Worker is deployed.",
+        "configured": "Configured",
+        "noCredentials": "No storage credentials are entered during onboarding. To change a resource, update the Worker bindings and redeploy.",
+        "bindings": {
+          "d1": {
+            "title": "D1 database",
+            "description": "Users, settings, albums, and photo metadata"
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "Original images and optimized delivery variants"
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "Live Photo videos and optimized video delivery"
+          },
+          "r2": {
+            "title": "R2 object storage",
+            "description": "Other non-image, non-video objects"
+          }
+        }
+      }
     },
     "map": {
       "title": "Map Service",
@@ -1488,6 +1555,9 @@
       "title": "Almost Done!",
       "description": "Your ChronoFrame gallery is ready to use.",
       "body": "You have completed all essential setup steps. You can now sign in with your admin account and start uploading photos.",
+      "bootstrapTokenLabel": "Deployment bootstrap token",
+      "bootstrapTokenHelp": "Required to create the first admin. Enter the CFRAME_BOOTSTRAP_TOKEN Worker secret; ChronoFrame sends it once and never stores it. An authenticated admin can leave it blank when resuming setup.",
+      "bootstrapTokenPlaceholder": "At least 32 characters",
       "goToDashboard": "Go to Dashboard",
       "setupFailedTitle": "Setup Failed",
       "setupFailedDescription": "Failed to complete setup"

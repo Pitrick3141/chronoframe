@@ -58,15 +58,21 @@ export async function withRetry<T>(
       logger?.info(`Operation attempt ${attempt}/${maxAttempts}`)
 
       // 应用超时机制
-      const result = await Promise.race([
-        operation(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Operation timeout after ${timeout}ms`)),
-            timeout,
-          ),
-        ),
-      ])
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
+      let result: T
+      try {
+        result = await Promise.race([
+          operation(),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error(`Operation timeout after ${timeout}ms`)),
+              timeout,
+            )
+          }),
+        ])
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId)
+      }
 
       if (attempt > 1) {
         logger?.success(`Operation succeeded on attempt ${attempt}`)

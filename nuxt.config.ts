@@ -11,7 +11,6 @@ export default defineNuxtConfig({
     '@nuxt/ui',
     '@nuxt/fonts',
     '@nuxt/icon',
-    '@nuxt/test-utils',
     '@pinia/nuxt',
     'motion-v/nuxt',
     'nuxt-auth-utils',
@@ -62,6 +61,21 @@ export default defineNuxtConfig({
           enabled: false,
         },
       },
+      cloudflare: {
+        images: {
+          // Cloudflare Hosted Images accepts image uploads up to 10 MiB.
+          maxUploadBytes: 10 * 1024 * 1024,
+        },
+        stream: {
+          // Basic Stream direct uploads must be strictly smaller than 200 MB.
+          maxUploadBytes: 200_000_000 - 1,
+        },
+        r2: {
+          // Raw uploads pass through the Worker. Keep the default within the
+          // 100 MB request-body limit used by Free and Pro Cloudflare plans.
+          maxObjectBytes: 100_000_000,
+        },
+      },
     },
     mapbox: {
       accessToken: '',
@@ -69,71 +83,36 @@ export default defineNuxtConfig({
     nominatim: {
       baseUrl: 'https://nominatim.openstreetmap.org',
     },
-    STORAGE_PROVIDER: 's3' satisfies 's3' | 'local' | 'openlist',
-    provider: {
-      s3: {
-        endpoint: '',
-        bucket: '',
-        region: 'auto',
-        accessKeyId: '',
-        secretAccessKey: '',
-        prefix: '',
-        cdnUrl: '',
-        forcePathStyle: false,
-      },
-      local: {
-        localPath: './data/storage',
-        baseUrl: '/storage',
-        prefix: 'photos/',
-      },
-      openlist: {
-        baseUrl: '',
-        rootPath: '',
-        token: '',
-        endpoints: {
-          upload: '/api/fs/put',
-          download: '',
-          list: '',
-          delete: '/api/fs/remove',
-          meta: '/api/fs/get',
-        },
-        pathField: 'path',
-        cdnUrl: '',
-      } as {
-        baseUrl: string
-        rootPath: string
-        token: string
-        endpoints: {
-          upload: string
-          download: string
-          list: string
-          delete: string
-          meta: string
-        }
-        pathField: string
-        cdnUrl: string
+    cloudflare: {
+      stream: {
+        // Override with NUXT_CLOUDFLARE_STREAM_MAX_DURATION_SECONDS.
+        maxDurationSeconds: 600,
       },
     },
     upload: {
       mime: {
         whitelistEnabled: true,
         whitelist:
-          'image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/heic,image/heif,video/quicktime,video/mp4',
+          'image/jpeg,image/png,image/webp,image/gif,image/svg+xml,image/heic,image/heif,video/quicktime,video/mp4',
       },
       duplicateCheck: {
         enabled: true,
         mode: 'skip' as 'warn' | 'block' | 'skip',
       },
     },
-    /** @deprecated Defaults to allow insecure cookies now */
-    allowInsecureCookie: false,
   },
 
   nitro: {
-    preset: 'node_server',
-    experimental: {
-      websocket: true,
-      tasks: true,
+    // Generate an ES module Worker. The legacy `cloudflare` preset targets
+    // service-worker syntax and cannot consume `cloudflare:workers` bindings.
+    preset: 'cloudflare_module',
+    typescript: {
+      tsConfig: {
+        compilerOptions: {
+          // Paths are resolved from .nuxt/tsconfig.server.json.
+          types: ['../worker-configuration.d.ts', 'node'],
+        },
+      },
     },
   },
 
@@ -162,7 +141,6 @@ export default defineNuxtConfig({
         'mapbox-gl',
         'maplibre-gl',
         '@indoorequal/vue-maplibre-gl',
-        'file-type',
         'reka-ui',
         'es-toolkit',
         'tippy.js',
@@ -241,7 +219,10 @@ export default defineNuxtConfig({
   },
 
   ogImage: {
-    fonts: ['Rubik:400', 'Rubik:700', 'Noto+Sans+SC:400', 'Noto+Sans+SC:700'],
+    // Each Noto Sans SC weight embeds roughly 19 MiB in the Worker bundle.
+    // Keep the compact Latin face so the compressed Worker remains below the
+    // Cloudflare upload limit; CJK text falls back to the renderer defaults.
+    fonts: ['Rubik:400', 'Rubik:700'],
   },
 
   dayjs: {

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export default eventHandler(async (event) => {
-  await requireUserSession(event)
+  await requireAdminSession(event)
 
   const { albumId } = await getValidatedRouterParams(
     event,
@@ -29,16 +29,8 @@ export default eventHandler(async (event) => {
     })
   }
 
-  // 使用事务删除相簌及其关联的照片关系
-  db.transaction((tx) => {
-    // 删除相簌-照片关系
-    tx.delete(tables.albumPhotos)
-      .where(eq(tables.albumPhotos.albumId, albumId))
-      .run()
-
-    // 删除相簌
-    tx.delete(tables.albums).where(eq(tables.albums.id, albumId)).run()
-  })
+  // album_photos 使用 ON DELETE CASCADE，D1 中无需同步事务回调。
+  await db.delete(tables.albums).where(eq(tables.albums.id, albumId)).run()
 
   return { success: true }
 })

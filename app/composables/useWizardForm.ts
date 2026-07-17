@@ -4,13 +4,15 @@ import type {
 } from '~~/shared/types/settings'
 import { useWizardStore } from '~/stores/wizard'
 
+type WizardNamespace = 'admin' | 'site' | 'storage' | 'map'
+
 /**
  * Wizard Form Composable
  * Handles fetching schema and managing state for wizard steps
  *
  * @param namespace Namespace for the wizard step (e.g. 'admin', 'storage')
  */
-export function useWizardForm(namespace: string) {
+export function useWizardForm(namespace: WizardNamespace) {
   const { t } = useI18n()
   const toast = useToast()
   const fields = ref<FieldDescriptor[]>([])
@@ -24,7 +26,7 @@ export function useWizardForm(namespace: string) {
       switch (namespace) {
         case 'admin':
           return store.admin
-        case 'app':
+        case 'site':
           return store.site
         case 'storage':
           return store.storage
@@ -39,7 +41,7 @@ export function useWizardForm(namespace: string) {
         case 'admin':
           store.updateAdmin(val)
           break
-        case 'app':
+        case 'site':
           store.updateSite(val)
           break
         case 'storage':

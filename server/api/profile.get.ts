@@ -1,3 +1,4 @@
 export default eventHandler(async (event) => {
-  return (await getUserSession(event)).user
+  const { user } = await getUserSession(event)
+  return user ? toPublicSessionUser(user) : undefined
 })

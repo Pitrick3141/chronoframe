@@ -1,14 +1,16 @@
 import { settingsManager } from '~~/server/services/settings/settingsManager'
 
-const _accessDeniedError = createError({
-  statusCode: 403,
-  statusMessage:
-    'Access denied. Please contact the administrator to activate your account.',
-})
+function accessDeniedError() {
+  return createError({
+    statusCode: 403,
+    statusMessage:
+      'Access denied. Please contact the administrator to activate your account.',
+  })
+}
 
 async function onGithubOAuthSuccess(event: any, { user }: { user: any }) {
   const db = useDB()
-  const userFromEmail = db
+  const userFromEmail = await db
     .select()
     .from(tables.users)
     .where(eq(tables.users.email, user.email || ''))
@@ -22,7 +24,8 @@ async function onGithubOAuthSuccess(event: any, { user }: { user: any }) {
 
   if (!userFromEmail) {
     // create a new user without admin permission
-    db.insert(tables.users)
+    await db
+      .insert(tables.users)
       .values({
         username: user.name || '',
         email: user.email || '',
@@ -32,20 +35,13 @@ async function onGithubOAuthSuccess(event: any, { user }: { user: any }) {
       .returning()
       .get()
     // then reject login
-    throw _accessDeniedError
+    throw accessDeniedError()
   } else if (userFromEmail.isAdmin === 0) {
-    throw _accessDeniedError
+    throw accessDeniedError()
   } else {
-    await setUserSession(
-      event,
-      { user: userFromEmail },
-      {
-        cookie: {
-          // secure: !useRuntimeConfig().allowInsecureCookie,
-          secure: false,
-        },
-      },
-    )
+    await setUserSession(event, {
+      user: toPublicSessionUser(userFromEmail),
+    })
   }
   return sendRedirect(event, '/')
 }

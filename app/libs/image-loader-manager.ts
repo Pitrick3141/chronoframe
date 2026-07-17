@@ -85,6 +85,13 @@ export class ImageLoaderManager {
                 onUpdateLoadingState?.({
                   isVisible: false,
                 })
+                reject(
+                  new Error(
+                    blob.type === 'image/svg+xml'
+                      ? 'SVG originals require a raster display variant'
+                      : 'Unsupported or unrecognized image format',
+                  ),
+                )
                 return
               }
 

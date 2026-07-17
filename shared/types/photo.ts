@@ -1,5 +1,3 @@
-import type { Tags } from 'exiftool-vendored'
-
 export interface NeededExif {
   Title?: string
   XPTitle?: string
@@ -7,11 +5,11 @@ export interface NeededExif {
   Keywords?: string[]
   XPKeywords?: string
 
-  Description?: Tags['Description']
-  ImageDescription?: Tags['ImageDescription']
-  CaptionAbstract?: Tags['Caption-Abstract']
-  XPComment?: Tags['XPComment']
-  UserComment?: Tags['UserComment']
+  Description?: string | string[] | null
+  ImageDescription?: string | null
+  CaptionAbstract?: string | null
+  XPComment?: string | null
+  UserComment?: string | null
 
   zone?: string
   tz?: string
@@ -63,36 +61,36 @@ export interface NeededExif {
   ImageWidth?: number
   ImageHeight?: number
 
-  MeteringMode: Tags['MeteringMode']
-  WhiteBalance: Tags['WhiteBalance']
-  WBShiftAB: Tags['WBShiftAB']
-  WBShiftGM: Tags['WBShiftGM']
-  WhiteBalanceBias: Tags['WhiteBalanceBias']
-  WhiteBalanceFineTune: Tags['WhiteBalanceFineTune']
-  FlashMeteringMode: Tags['FlashMeteringMode']
-  SensingMethod: Tags['SensingMethod']
-  FocalPlaneXResolution: Tags['FocalPlaneXResolution']
-  FocalPlaneYResolution: Tags['FocalPlaneYResolution']
-  GPSAltitude: Tags['GPSAltitude']
-  GPSLatitude: Tags['GPSLatitude']
-  GPSLongitude: Tags['GPSLongitude']
-  GPSAltitudeRef: Tags['GPSAltitudeRef']
-  GPSLatitudeRef: Tags['GPSLatitudeRef']
-  GPSLongitudeRef: Tags['GPSLongitudeRef']
+  MeteringMode?: string | number | null
+  WhiteBalance?: string | number | null
+  WBShiftAB?: string | number | null
+  WBShiftGM?: string | number | null
+  WhiteBalanceBias?: string | number | null
+  WhiteBalanceFineTune?: string | number | null
+  FlashMeteringMode?: string | number | null
+  SensingMethod?: string | number | null
+  FocalPlaneXResolution?: number | null
+  FocalPlaneYResolution?: number | null
+  GPSAltitude?: string | number | null
+  GPSLatitude?: string | number | null
+  GPSLongitude?: string | number | null
+  GPSAltitudeRef?: string | number | null
+  GPSLatitudeRef?: string | null
+  GPSLongitudeRef?: string | null
 
   // HDR Type
-  MPImageType?: Tags['MPImageType']
+  MPImageType?: string | string[] | number | null
 
   Rating?: number
 
   // Motion Photo (XMP) related fields
-  MotionPhoto?: Tags['MotionPhoto']
-  MotionPhotoVersion?: Tags['MotionPhotoVersion']
-  MotionPhotoPresentationTimestampUs?: Tags['MotionPhotoPresentationTimestampUs']
-  MicroVideo?: Tags['MicroVideo']
-  MicroVideoVersion?: Tags['MicroVideoVersion']
-  MicroVideoOffset?: Tags['MicroVideoOffset']
-  MicroVideoPresentationTimestampUs?: Tags['MicroVideoPresentationTimestampUs']
+  MotionPhoto?: string | number | boolean | null
+  MotionPhotoVersion?: string | number | null
+  MotionPhotoPresentationTimestampUs?: string | number | null
+  MicroVideo?: string | number | boolean | null
+  MicroVideoVersion?: string | number | null
+  MicroVideoOffset?: string | number | null
+  MicroVideoPresentationTimestampUs?: string | number | null
 }
 
 export interface PhotoInfo {

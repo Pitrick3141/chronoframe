@@ -1,28 +1,58 @@
-export default eventHandler(async (_event) => {
+export default eventHandler(async (event) => {
   const db = useDB()
+  const session = await getUserSession(event)
+  const isAdmin = session.user?.isAdmin === 1
 
   // 获取所有相册，按创建时间倒序
   const albums = await db.select().from(tables.albums)
 
-  // 为每个相册获取照片 ID 列表（避免循环引用）
-  const albumsWithPhotoIds = await Promise.all(
-    albums.map(async (album) => {
-      const photoIds = await db
-        .select({
-          photoId: tables.albumPhotos.photoId,
-          position: tables.albumPhotos.position,
-        })
-        .from(tables.albumPhotos)
-        .where(eq(tables.albumPhotos.albumId, album.id))
-        .orderBy(tables.albumPhotos.position)
+  // Fetch relations once. Per-album Promise.all queries can exceed the D1
+  // connection limit when a gallery contains many albums.
+  const relations = await db
+    .select({
+      albumId: tables.albumPhotos.albumId,
+      photoId: tables.albumPhotos.photoId,
+    })
+    .from(tables.albumPhotos)
+    .orderBy(tables.albumPhotos.albumId, tables.albumPhotos.position)
 
-      return {
-        ...album,
-        // 即使是空相册，也返回空数组而不是 undefined
-        photoIds: photoIds.length > 0 ? photoIds.map((p) => p.photoId) : [],
-      }
-    }),
+  const photoIdsByAlbum = new Map<number, string[]>()
+  for (const relation of relations) {
+    const photoIds = photoIdsByAlbum.get(relation.albumId) ?? []
+    photoIds.push(relation.photoId)
+    photoIdsByAlbum.set(relation.albumId, photoIds)
+  }
+
+  const hiddenAlbumIds = new Set(
+    albums.filter((album) => album.isHidden).map((album) => album.id),
   )
+  const hiddenPhotoIds = new Set<string>()
+  if (!isAdmin) {
+    for (const relation of relations) {
+      if (hiddenAlbumIds.has(relation.albumId)) {
+        hiddenPhotoIds.add(relation.photoId)
+      }
+    }
+    for (const album of albums) {
+      if (album.isHidden && album.coverPhotoId) {
+        hiddenPhotoIds.add(album.coverPhotoId)
+      }
+    }
+  }
+
+  const visibleAlbums = isAdmin
+    ? albums
+    : albums.filter((album) => !album.isHidden)
+  const albumsWithPhotoIds = visibleAlbums.map((album) => ({
+    ...album,
+    coverPhotoId:
+      album.coverPhotoId && hiddenPhotoIds.has(album.coverPhotoId)
+        ? null
+        : album.coverPhotoId,
+    photoIds: (photoIdsByAlbum.get(album.id) ?? []).filter(
+      (photoId) => !hiddenPhotoIds.has(photoId),
+    ),
+  }))
 
   // 按创建时间倒序排列
   return albumsWithPhotoIds.sort(

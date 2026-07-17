@@ -69,6 +69,14 @@ const masonryItems = computed(() => {
     })) ?? []
   )
 })
+
+const masonryKeyMapper = (
+  _item: unknown,
+  _column: number,
+  _row: number,
+  index: number,
+) => masonryItems.value[index]?.originalIndex ?? index
+
 useResizeObserver(headerRef, (entries) => {
   const entry = entries[0]
   if (entry) {
@@ -425,10 +433,7 @@ watch(currentPhotoIndex, (newIndex) => {
           :min-columns="minColumns"
           :max-columns="maxColumns"
           :ssr-columns="2"
-          :key-mapper="
-            (_item, _column, _row, index) =>
-              masonryItems[index]?.originalIndex ?? index
-          "
+          :key-mapper="masonryKeyMapper"
         >
           <template #default="{ item }">
             <!-- Photo Items -->

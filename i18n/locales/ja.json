@@ -75,18 +75,18 @@
           "nativeShare": "システム共有を使用",
           "copyLink": "リンクをコピー",
           "copyImage": "画像をコピー",
-          "downloadImage": "オリジナルをダウンロード",
+          "downloadImage": "表示用画像をダウンロード",
           "generateShareImage": "共有画像を生成",
           "shareUrl": "共有URL",
           "downloadOgImage": "プレビューをダウンロード",
-          "downloadOriginal": "オリジナルをダウンロード",
-          "downloadOriginalImage": "オリジナル画像をダウンロード"
+          "downloadOriginal": "表示用画像をダウンロード",
+          "downloadOriginalImage": "表示用画像をダウンロード"
         },
         "success": {
           "linkCopied": "リンクをクリップボードにコピーしました",
           "imageCopied": "画像をクリップボードにコピーしました",
           "ogImageDownloaded": "プレビュー画像のダウンロードが完了しました",
-          "originalImageDownloaded": "オリジナル画像のダウンロードが完了しました"
+          "originalImageDownloaded": "表示用画像のダウンロードが完了しました"
         },
         "error": {
           "copyNotSupported": "このブラウザではコピー機能がサポートされていません",
@@ -94,7 +94,7 @@
           "nativeShareFailed": "ネイティブ共有に失敗しました",
           "linkCopyFailed": "リンクのコピーに失敗しました",
           "ogImageDownloadFailed": "プレビュー画像のダウンロードに失敗しました",
-          "originalImageDownloadFailed": "オリジナル画像のダウンロードに失敗しました"
+          "originalImageDownloadFailed": "表示用画像のダウンロードに失敗しました"
         },
         "ogImage": {
           "title": "共有プレビュー",
@@ -487,7 +487,7 @@
       },
       "uploader": {
         "label": "ドラッグアンドドロップするか、クリックして写真を選択します",
-        "description": "JPEG、PNG、HEIC形式の写真、およびMOV形式のライブフォトビデオをサポート。ファイルあたりの最大サイズ：{maxSize}MB"
+        "description": "JPEG、PNG、HEIC 画像は Hosted Images（1 ファイル最大 {imageMaxSize} MiB）、MOV ライブフォト動画は Cloudflare Stream（1 ファイル最大 {videoMaxSize} MiB）を使用します。"
       },
       "toolbar": {
         "title": "写真管理",
@@ -541,7 +541,7 @@
       "actions": {
         "reprocess": "再処理",
         "refreshLocation": "都市情報を再取得",
-        "eraseLocationInfo": "位置情報を抹消",
+        "eraseLocationInfo": "ChronoFrame の位置メタデータを消去",
         "delete": "削除",
         "editMetadata": "メタデータを編集",
         "previewPhoto": "プレビュー写真"
@@ -549,7 +549,7 @@
       "selection": {
         "selected": "{count} / {total}行選択済み",
         "batchReprocess": "一括再処理",
-        "batchEraseLocation": "位置情報を抹消",
+        "batchEraseLocation": "ChronoFrame の位置メタデータを消去",
         "batchDownload": "一括ダウンロード",
         "batchDelete": "一括削除"
       },
@@ -558,8 +558,8 @@
         "description": "ドラッグアンドドロップするか、ファイルを選択します。写真は自動的に処理され、ライブラリに追加されます。",
         "options": {
           "eraseLocation": {
-            "label": "アップロード時に位置情報を抹消",
-            "description": "このアップロードではシステム既定値を上書きでき、いつでもオン/オフを切り替えできます。"
+            "label": "アップロード時に ChronoFrame の位置メタデータを消去",
+            "description": "ChronoFrame が保存する GPS 派生フィールドだけを消去します。Hosted Images の元ファイルは書き換えられず、EXIF GPS が残る場合があります。"
           },
           "duplicateCheck": {
             "label": "重複ファイルの処理方法",
@@ -643,10 +643,10 @@
         "queueUnavailable": "タスクキューを利用できません",
         "reverseGeocodeQueued": "都市情報の再取得タスクをキューに追加しました",
         "reverseGeocodeFailed": "都市情報の再取得タスクの追加に失敗しました",
-        "eraseLocationQueued": "位置情報の抹消タスクをキューに追加しました",
-        "eraseLocationFailed": "位置情報の抹消タスクの追加に失敗しました",
-        "batchEraseLocationQueued": "{count} 件の位置情報抹消タスクをキューに追加しました",
-        "batchEraseLocationFailed": "位置情報抹消タスクの一括追加に失敗しました",
+        "eraseLocationQueued": "ChronoFrame の位置メタデータ消去タスクをキューに追加しました",
+        "eraseLocationFailed": "位置メタデータ消去タスクの追加に失敗しました",
+        "batchEraseLocationQueued": "{count} 件の位置メタデータ消去タスクをキューに追加しました",
+        "batchEraseLocationFailed": "位置メタデータ消去タスクの一括追加に失敗しました",
         "taskSubmitFailed": "タスクの送信に失敗しました",
         "taskStatusCheckFailed": "タスク状態の確認に失敗しました",
         "uploadFailed": "アップロードに失敗しました"
@@ -655,11 +655,11 @@
         "noSelection": "アップロードする写真を選択してください",
         "fileValidationFailed": "ファイル検証に失敗しました",
         "allFilesValidationFailed": "すべてのファイルが検証に失敗しました",
-        "allFilesTooLarge": "選択した {count} 件のファイルはすべて最大サイズ制限（{maxSize}MB）を超えています。",
-        "filesTooLargeSkipped": "サイズ超過のファイルを {count} 件スキップしました（上限 {maxSize}MB）。残りのファイルはアップロードを続行します。",
+        "allFilesTooLarge": "選択した {count} 件のファイルはすべて対応するサービス上限を超えています（Hosted Images: {imageMaxSize} MiB、Stream 動画: {videoMaxSize} MiB）。",
+        "filesTooLargeSkipped": "サイズ超過のファイルを {count} 件スキップしました（Hosted Images: {imageMaxSize} MiB、Stream 動画: {videoMaxSize} MiB）。残りのファイルはアップロードを続行します。",
         "filesUnsupportedSkipped": "未対応形式のファイルを {count} 件スキップしました。残りのファイルはアップロードを続行します。",
         "unsupportedFormat": "サポートされていないファイル形式：{type}。JPEG、PNG、またはHEIC写真、またはMOV形式のライブフォトビデオを選択してください。",
-        "fileTooLarge": "ファイルが大きすぎます：{size}MB。最大サポート：{maxSize}MB。",
+        "fileTooLarge": "ファイルが大きすぎます：{size} MiB。最大サイズ：{maxSize} MiB。",
         "uploadFailed": "アップロードに失敗しました",
         "uploadNetworkError": "ネットワーク接続に失敗したか、CORSエラーが発生しました。ネットワークとストレージ設定を確認してください。",
         "uploadCorsError": "CORSリクエストに失敗しました。ストレージCORS設定を確認してください。",
@@ -869,6 +869,7 @@
             "opensuse": "openSUSE",
             "macos": "macOS",
             "docker": "Docker コンテナ",
+            "cloudflare-workers": "Cloudflare Workers",
             "unknown": "不明なシステム"
           }
         },
@@ -954,9 +955,13 @@
       "messages": {
         "noTasks": "タスクが見つかりません",
         "retrySuccess": "タスクの再試行が成功しました",
+        "retryPending": "タスクを再試行し、処理を継続しています",
         "retryFailed": "タスクの再試行に失敗しました",
         "deleteSuccess": "タスクの削除が成功しました",
         "batchRetrySuccess": "バッチ再試行が成功しました",
+        "batchRetryPending": "一括再試行は処理中です",
+        "batchRetryPartial": "一括再試行の一部が失敗しました",
+        "batchRetryStatusDescription": "完了: {completed}、処理中: {pending}、失敗: {failed}",
         "clearSuccess": "クリア完了",
         "operationFailed": "操作に失敗しました",
         "clearSuccessDescription": "{count} 件のタスクをクリアしました",
@@ -1142,12 +1147,12 @@
     "privacy": {
       "upload": {
         "autoEraseLocation": {
-          "label": "アップロード時に位置情報を自動で抹消",
-          "description": "アップロード処理中に EXIF の GPS 情報と地理位置フィールドを自動的に削除します",
-          "help": "有効化すると、位置情報抹消はキューで非同期に実行されます"
+          "label": "アップロード時に ChronoFrame の位置メタデータを消去",
+          "description": "D1 に保存された GPS 派生 EXIF 値と位置フィールドを消去します。Hosted Images の元ファイルは書き換えません。",
+          "help": "公開表示用画像は元メタデータなしで再エンコードされますが、管理者が元ファイルをダウンロードすると EXIF GPS が残っている場合があります。"
         }
       },
-      "sectionDescription": "写真アップロード時のデータプライバシーポリシーを管理します。公開サイトでは位置情報の削除を有効にすることをお勧めします。"
+      "sectionDescription": "ChronoFrame が公開する位置メタデータを管理します。元ファイルの EXIF を不可逆に削除する必要がある場合は、アップロード前に消去してください。"
     },
     "storage": {
       "name": {
@@ -1266,7 +1271,45 @@
           "description": "画像にアクセスするためのカスタム CDN URL"
         }
       },
-      "sectionDescription": "デフォルトのストレージ構成と利用可能なストレージプロバイダーを管理します。このページの設定は以降のファイルアップロードにのみ影響します。",
+      "sectionDescription": "ストレージは Cloudflare のデプロイバインディングで提供され、実行時は読み取り専用です。",
+      "cloudflare": {
+        "title": "Cloudflare ストレージ構成",
+        "description": "ChronoFrame は Worker のデプロイ時に設定された D1、Hosted Images、Stream、R2 バインディングを使用します。",
+        "refresh": "ヘルス状態を更新",
+        "status": {
+          "checking": "確認中",
+          "healthy": "正常",
+          "degraded": "機能低下",
+          "missing": "未構成",
+          "unavailable": "利用不可"
+        },
+        "healthUnavailable": {
+          "title": "ストレージのヘルス状態を確認できません",
+          "description": "下記の構成は引き続き有効です。更新してバインディングのヘルスチェックを再試行してください。"
+        },
+        "readonly": {
+          "title": "デプロイで管理される設定",
+          "description": "ストレージバインディングと認証情報はここで変更できません。変更する場合は Worker の Cloudflare バインディングを更新して再デプロイしてください。"
+        },
+        "bindings": {
+          "d1": {
+            "title": "D1 データベース",
+            "description": "ユーザー、設定、アルバム、写真メタデータ、処理状態を保存します。"
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "画像アセットを保存し、最適化された配信バリアントを提供します。画像のデフォルト上限は 10 MiB です。"
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "ライブフォト動画を保存・配信します。basic アップロードは 200 MB 未満に限られます。"
+          },
+          "r2": {
+            "title": "R2 オブジェクトストレージ",
+            "description": "その他の非画像・非動画バイナリオブジェクトを保存します。"
+          }
+        }
+      },
       "table": {
         "columns": {
           "name": "ストレージ名",
@@ -1404,7 +1447,31 @@
     },
     "storage": {
       "title": "ストレージ設定",
-      "description": "写真の保存先を選択します"
+      "description": "ChronoFrame 用にプロビジョニングされた Cloudflare リソースを確認します",
+      "cloudflare": {
+        "title": "Cloudflare ストレージバインディングは構成済みです",
+        "description": "永続データは Worker のデプロイ時に設定されたバインディングを通じて D1、Hosted Images、Stream、R2 に保存されます。",
+        "configured": "構成済み",
+        "noCredentials": "オンボーディングでストレージ認証情報を入力する必要はありません。リソースを変更する場合は Worker バインディングを更新して再デプロイしてください。",
+        "bindings": {
+          "d1": {
+            "title": "D1 データベース",
+            "description": "ユーザー、設定、アルバム、写真メタデータ"
+          },
+          "images": {
+            "title": "Hosted Images",
+            "description": "オリジナル画像と最適化された配信バリアント"
+          },
+          "stream": {
+            "title": "Cloudflare Stream",
+            "description": "ライブフォト動画と最適化された動画配信"
+          },
+          "r2": {
+            "title": "R2 オブジェクトストレージ",
+            "description": "その他の非画像・非動画オブジェクト"
+          }
+        }
+      }
     },
     "map": {
       "title": "地図サービス",
@@ -1414,6 +1481,9 @@
       "title": "まもなく完了です！",
       "description": "ChronoFrame ギャラリーの準備ができました。",
       "body": "基本設定はすべて完了しました。管理者アカウントでログインして写真のアップロードを開始できます。",
+      "bootstrapTokenLabel": "デプロイ用ブートストラップトークン",
+      "bootstrapTokenHelp": "最初の管理者作成時に必要です。Worker シークレットの CFRAME_BOOTSTRAP_TOKEN を入力してください。ChronoFrame は一度だけ送信し、保存しません。認証済み管理者が設定を再開する場合は空欄にできます。",
+      "bootstrapTokenPlaceholder": "32 文字以上",
       "goToDashboard": "ダッシュボードへ",
       "setupFailedTitle": "セットアップ失敗",
       "setupFailedDescription": "セットアップの完了に失敗しました"

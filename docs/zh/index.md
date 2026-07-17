@@ -5,7 +5,7 @@ layout: home
 hero:
   name: 'ChronoFrame'
   text: '自部署个人画廊'
-  tagline: '在线管理照片，多存储后端、LivePhoto、地球仪视图'
+  tagline: 'Cloudflare 原生个人画廊，支持 Live Photo 与地图视图'
   image:
     src: /logo.png
     alt: ChronoFrame
@@ -27,10 +27,10 @@ features:
     details: 通过网页界面轻松管理和浏览照片，并在地图上查看照片拍摄地点。
   - title: 简单部署
     icon: 🚀
-    details: 使用 Docker 一条命令即可部署，无需数据库（基于 SQLite3）。
-  - title: 灵活的存储方案
+    details: 使用 Wrangler 将 Nuxt 应用直接构建并部署到 Cloudflare Workers。
+  - title: Cloudflare 原生存储
     icon: 💾
-    details: 支持多种存储后端，包括兼容 S3 的存储和本地文件系统。
+    details: 记录保存到 D1，图片保存到 Hosted Images，视频保存到 Stream，其他对象保存到 R2，客户端文件由 Workers Assets 提供。
   - title: 智能地理位置
     icon: 🌍
     details: 自动提取照片 GPS 信息，使用 Mapbox 进行地理编码，在地图上展示照片拍摄位置。
@@ -39,7 +39,7 @@ features:
     details: 完美适配桌面端和移动端，支持触摸操作和手势控制，提供原生应用般的体验。
   - title: Live/Motion Photo 支持
     icon: 🎬
-    details: 完整支持 Apple LivePhoto 格式和 Google 标准的 Motion Photo，自动检测和处理 MOV 视频文件，保留动态照片效果。
+    details: 匹配 Apple Live Photo 与 Motion Photo 视频，直传 Cloudflare Stream 并通过 HLS 播放。
 ---
 
 ## 🌍 演示站点

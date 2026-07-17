@@ -1,117 +1,28 @@
-# 升级指南
+# 更新 Workers 上的 ChronoFrame
 
-本文档将指导您如何安全地更新和升级 ChronoFrame 到最新版本。
+ChronoFrame 会先构建发布产物，再在部署依赖新表结构的代码前应用尚未执行的数据库 migration。重大升级前请保存最新的 D1 导出，并为 Hosted Images、Stream 视频与 R2 对象建立清单/备份。
 
-## 版本检查
-
-### 查看当前版本
-
-#### 通过 Web 界面
-
-1. 登录 ChronoFrame 管理后台
-2. 进入「仪表板」页面
-3. 查看「运行信息」面板中的版本号
-
-## 更新流程
-
-### 准备工作
-
-#### 1. 数据备份
+## 标准更新
 
 ```bash
-# 停止服务
-docker-compose down
-
-# 创建完整备份
-ts=$(date +%Y%m%d-%H%M%S) && mkdir -p backups/$ts && cp -r data/ .env docker-compose.yml backups/$ts/
+git pull --ff-only
+pnpm install --frozen-lockfile
+pnpm cf:typegen
+pnpm run deploy
 ```
 
-#### 2. 检查兼容性
+部署前先审查 migration SQL 和 release notes。`pnpm run deploy` 会在修改 D1 前完成构建；随后 Wrangler 记录并只执行尚未应用的 migration，最后发布 Worker。
 
-查看 [发布说明](https://github.com/HoshinoSuzumi/chronoframe/releases) 了解：
+## 回滚预期
 
-- 破坏性变更
-- 新增环境变量
-- 功能弃用通知
+部署旧版 Worker 代码不会反向撤销 D1 migration。应优先采用向后兼容的 schema 变更和分阶段发布。如果必须回滚 schema，请明确恢复或转换 D1，不能仅删除 migration 记录。
 
-### Docker Compose 更新（推荐）
+Images、Stream 视频和 R2 对象变更也独立于 Worker 代码部署。批量变更应保留 migration manifest，便于逐项核对每项服务。回滚代码不会撤销 Stream 上传或已产生的传输分钟。
 
-#### 标准更新流程
+## GitHub Actions
 
-```bash
-# 1. 进入项目目录
-cd /path/to/chronoframe
+Cloudflare Workers workflow 会在受保护的 `production` environment 中执行相同发布顺序：安装、校验/构建、替换配置的 D1 database ID、应用远端 migration，再部署。所需 secret 和 variable 见 [部署到 Cloudflare Workers](/zh/guide/getting-started#github-actions-部署)。
 
-# 2. 备份当前配置
-cp docker-compose.yml docker-compose.yml.backup
+## 从旧 Docker 版本升级
 
-# 3. 停止当前服务
-docker-compose down
-
-# 4. 拉取最新镜像
-docker-compose pull
-
-# 5. 启动新版本
-docker-compose up -d
-
-# 6. 查看启动日志
-docker-compose logs -f chronoframe
-```
-
-#### 指定版本更新
-
-如果需要更新到特定版本：
-
-```yaml
-# docker-compose.yml
-services:
-  chronoframe:
-    image: ghcr.io/hoshinosuzumi/chronoframe:v1.2.3 # 指定版本
-    # ... 其他配置
-```
-
-```bash
-docker-compose up -d
-```
-
-### 单容器更新
-
-```bash
-# 停止现有容器
-docker stop chronoframe
-docker rm chronoframe
-
-# 拉取最新镜像
-docker pull ghcr.io/hoshinosuzumi/chronoframe:latest
-
-# 使用相同配置启动新容器
-docker run -d \
-  --name chronoframe \
-  -p 3000:3000 \
-  -v $(pwd)/data:/app/data \
-  --env-file .env \
-  ghcr.io/hoshinosuzumi/chronoframe:latest
-```
-
-## 数据库迁移
-
-### 自动迁移
-
-ChronoFrame 在启动时会自动执行数据库迁移：
-
-```bash
-# 查看迁移日志
-docker logs chronoframe | grep -i migration
-```
-
-### 手动迁移（高级）
-
-在特殊情况下，您可能需要手动执行迁移：
-
-```bash
-# 进入容器
-docker exec -it chronoframe sh
-
-# 执行迁移
-npx drizzle-kit migrate
-```
+不要使用 Docker 更新流程迁移到此版本。当前分支已移除 Docker 构建与镜像发布文件，因为旧 Node 运行时无法提供 D1、Hosted Images、Stream、R2 或 Assets bindings。请改用 [迁移现有安装](/zh/guide/migrate-to-workers)；只有在查阅旧容器结构时才需要查看迁移前的 release 或 Git tag。

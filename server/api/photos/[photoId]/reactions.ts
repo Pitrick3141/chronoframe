@@ -1,6 +1,8 @@
 import type { H3Event } from 'h3'
 import { eq, and, sql } from 'drizzle-orm'
 
+import { requireReadablePhoto } from '~~/server/utils/media-access'
+
 const REACTION_TYPES = [
   'like',
   'love',
@@ -61,6 +63,10 @@ export default defineEventHandler(async (event) => {
 
   const db = useDB()
   const method = event.method
+
+  // Missing and private photos intentionally share the same 404 response.
+  // This check precedes every supported operation, including reaction reads.
+  await requireReadablePhoto(event, photoId)
 
   // GET: 获取照片的表态统计
   if (method === 'GET') {
@@ -129,20 +135,6 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // 检查照片是否存在
-    const photo = await db
-      .select()
-      .from(tables.photos)
-      .where(eq(tables.photos.id, photoId))
-      .get()
-
-    if (!photo) {
-      throw createError({
-        statusCode: 404,
-        message: 'Photo not found',
-      })
-    }
-
     // 获取额外信息用于审计
     const headers = getHeaders(event)
     const ipAddress = getRequestIP(event, { xForwardedFor: true })
@@ -177,13 +169,27 @@ export default defineEventHandler(async (event) => {
       }
     } else {
       // 创建新表态
-      await db.insert(tables.photoReactions).values({
-        photoId,
-        reactionType,
-        fingerprint,
-        ipAddress,
-        userAgent,
-      })
+      await db
+        .insert(tables.photoReactions)
+        .values({
+          photoId,
+          reactionType,
+          fingerprint,
+          ipAddress,
+          userAgent,
+        })
+        .onConflictDoUpdate({
+          target: [
+            tables.photoReactions.photoId,
+            tables.photoReactions.fingerprint,
+          ],
+          set: {
+            reactionType,
+            ipAddress,
+            userAgent,
+            updatedAt: new Date(),
+          },
+        })
 
       return {
         success: true,

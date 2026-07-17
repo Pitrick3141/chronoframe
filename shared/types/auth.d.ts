@@ -1,7 +1,10 @@
 import type { User as DBUser } from '../../server/utils/db'
 
-declare module '#auth-utils' {
-  interface User extends DBUser {}
-}
+export type PublicSessionUser = Pick<
+  DBUser,
+  'id' | 'username' | 'email' | 'avatar' | 'createdAt' | 'isAdmin'
+>
 
-export {}
+declare module '#auth-utils' {
+  interface User extends PublicSessionUser {}
+}
