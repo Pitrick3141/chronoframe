@@ -147,6 +147,27 @@ export const SYSTEM_SETTINGS_UI: Record<string, FieldUIConfig> = {
     ],
     help: 'settings.system.upload.duplicateCheck.mode.help',
   },
+  'upload.oversizedImage.mode': {
+    type: 'tabs',
+    options: [
+      {
+        label: 'settings.system.upload.oversizedImage.mode.options.compress',
+        value: 'compress',
+        icon: 'tabler:photo-down',
+      },
+      {
+        label: 'settings.system.upload.oversizedImage.mode.options.skip',
+        value: 'skip',
+        icon: 'tabler:player-track-next',
+      },
+      {
+        label: 'settings.system.upload.oversizedImage.mode.options.block',
+        value: 'block',
+        icon: 'tabler:ban',
+      },
+    ],
+    help: 'settings.system.upload.oversizedImage.mode.help',
+  },
   webglImageViewerDebug: {
     type: 'toggle',
     help: 'settings.system.webglImageViewerDebug.help',

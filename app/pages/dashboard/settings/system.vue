@@ -47,6 +47,7 @@ const SYSTEM_SECTION_ORDER: SystemSection[] = [
       'upload.maxFileSize',
       'upload.duplicateCheck.enabled',
       'upload.duplicateCheck.mode',
+      'upload.oversizedImage.mode',
     ],
   },
   {

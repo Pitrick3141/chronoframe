@@ -536,7 +536,8 @@
         },
         "selectAllAria": "全選",
         "selectRowAria": "選擇列",
-        "thumbnailAlt": "照片縮圖"
+        "thumbnailAlt": "照片縮圖",
+        "shiftSelectHint": "先點選一個核取方塊，再按住 Shift 點選另一個，可依目前顯示順序連續選取或取消選取。"
       },
       "actions": {
         "reprocess": "重新處理",
@@ -1100,6 +1101,18 @@
               "block": "阻止上傳"
             }
           }
+        },
+        "oversizedImage": {
+          "mode": {
+            "label": "超大圖片處理",
+            "description": "選擇圖片超過儲存上限時的處理方式。",
+            "help": "阻止：拒絕目前檔案；略過：忽略該檔案並繼續批次上傳；壓縮：轉為有損 WebP，必要時縮小尺寸，並保留照片資訊。壓縮版會取代上傳的原始圖片。靜態圖片最多 20 MB，Motion Photo 總檔案仍最多 25 MiB；壓縮失敗時阻止該檔案。",
+            "options": {
+              "compress": "壓縮後上傳",
+              "skip": "略過",
+              "block": "阻止上傳"
+            }
+          }
         }
       },
       "webglImageViewerDebug": {
@@ -1641,6 +1654,30 @@
     "progress": {
       "calculating": "計算中...",
       "seconds": "{seconds}秒"
+    },
+    "oversized": {
+      "blockedTitle": "圖片已阻止",
+      "blockedMessage": "{fileName} 超過 {maxSize} MiB 的圖片上限。",
+      "skippedTitle": "圖片已略過",
+      "skippedMessage": "已略過 {fileName}：圖片超過 {maxSize} MiB。",
+      "compressionLimit": "無法壓縮 {fileName}：靜態圖片最多 20 MB，Motion Photo 總檔案最多 25 MiB。請先在本機壓縮，或選擇略過。",
+      "compressionFailed": "未能將 {fileName} 壓縮至 {maxSize} MiB 以內，該檔案未上傳。",
+      "compressed": "{fileName} 已從 {before} MiB 壓縮至 {after} MiB，並以 WebP 儲存。",
+      "uploaderHint": "儲存圖片最多 {imageMaxSize} MiB，超限依系統設定處理；影片最多 {videoMaxSize} MiB。"
+    },
+    "metadata": {
+      "group": "檔案中繼資料",
+      "camera": "相機資訊",
+      "people": "人物／作者資訊",
+      "gps": "GPS 資訊",
+      "reading": "正在讀取{label}…",
+      "present": "{label}：已偵測到",
+      "absent": "{label}：未偵測到",
+      "unknown": "{label}：無法偵測",
+      "unsupported": "{label}：暫不支援偵測此格式的中繼資料",
+      "tooLarge": "{label}：檔案超過 100 MiB 偵測上限",
+      "readError": "{label}：無法完整讀取中繼資料",
+      "legend": "相機、人物／作者與 GPS 標記表示檔案內的中繼資料。亮色為已偵測到，灰色為未偵測到，問號為無法偵測；確認上傳前僅在本機讀取。"
     }
   },
   "photo": {

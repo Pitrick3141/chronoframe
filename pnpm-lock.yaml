@@ -56,6 +56,9 @@ importers:
       es-toolkit:
         specifier: ^1.47.0
         version: 1.47.0
+      exifreader:
+        specifier: 4.44.0
+        version: 4.44.0
       file-type:
         specifier: ^22.0.1
         version: 22.0.1
@@ -4351,6 +4354,10 @@ packages:
     peerDependencies:
       vue: ^3.5.0
 
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
+
   '@yeger/debounce@2.0.17':
     resolution: {integrity: sha512-wz9ARkGnY25yToyaZaCz887aRxsIg96uI/waBLkV/Qfh9/VHP+C6uAFpOg8FPba0KMS2QYo2dhCOqPvCoDigyA==}
 
@@ -5365,6 +5372,10 @@ packages:
   execa@9.6.1:
     resolution: {integrity: sha512-9Be3ZoN4LmYR90tUoVu2te2BsbzHfhJyfEiAVfz7N5/zv+jduIfLrV2xdQXOHbaD6KgpGdO9PRPM1Y4Q9QkPkA==}
     engines: {node: ^18.19.0 || >=20.5.0}
+
+  exifreader@4.44.0:
+    resolution: {integrity: sha512-NviP4AQgrZHiNZT8IEsXtyaAKLkc0C55dfQ8fyaAXiL59EJLDdsvP/hZhAfTJpdVuHDGHU7GuUZ1qrJtINckvw==}
+    hasBin: true
 
   expand-template@2.0.3:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
@@ -12548,6 +12559,9 @@ snapshots:
     dependencies:
       vue: 3.5.35(typescript@5.9.3)
 
+  '@xmldom/xmldom@0.9.12':
+    optional: true
+
   '@yeger/debounce@2.0.17': {}
 
   '@yeger/vue-masonry-wall@6.1.1(vue@3.5.35(typescript@5.9.3))':
@@ -13590,6 +13604,10 @@ snapshots:
       signal-exit: 4.1.0
       strip-final-newline: 4.0.0
       yoctocolors: 2.1.2
+
+  exifreader@4.44.0:
+    optionalDependencies:
+      '@xmldom/xmldom': 0.9.12
 
   expand-template@2.0.3:
     optional: true

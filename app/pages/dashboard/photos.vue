@@ -1,10 +1,16 @@
 <script lang="ts" setup>
-import type { DropdownMenuItem, FormSubmitEvent, TableColumn } from '@nuxt/ui'
+import type {
+  DropdownMenuItem,
+  FormSubmitEvent,
+  TableColumn,
+  TableRow,
+} from '@nuxt/ui'
 import type { Photo, PipelineQueueItem } from '~~/server/utils/db'
 import type { UploadTransportOptions } from '~/composables/useUpload'
 import { h, resolveComponent } from 'vue'
 import { Icon, UBadge } from '#components'
 import ThumbImage from '~/components/ui/ThumbImage.vue'
+import { updatePhotoSelection } from '~/utils/photo-selection'
 
 const UCheckbox = resolveComponent('UCheckbox')
 const Rating = resolveComponent('Rating')
@@ -36,7 +42,6 @@ useHead({
 
 const MEBIBYTE = 1024 * 1024
 const DEFAULT_HOSTED_IMAGES_MAX_UPLOAD_BYTES = 10 * MEBIBYTE
-const MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES = 25 * MEBIBYTE
 const DEFAULT_STREAM_MAX_UPLOAD_BYTES = 200_000_000 - 1
 
 type CloudflareUploadLimits = {
@@ -68,7 +73,7 @@ const streamMaxUploadBytes = readPositiveByteLimit(
   DEFAULT_STREAM_MAX_UPLOAD_BYTES,
 )
 const bytesToMiB = (bytes: number) => Number((bytes / MEBIBYTE).toFixed(2))
-const imageSourceMaxUploadMiB = bytesToMiB(MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES)
+const imageSourceMaxUploadMiB = bytesToMiB(hostedImagesMaxUploadBytes)
 const streamMaxUploadMiB = bytesToMiB(streamMaxUploadBytes)
 
 const systemUploadEraseLocationDefault = computed(() => {
@@ -142,6 +147,7 @@ type UploadIntentResponse = {
   intentId?: string
   expiresIn?: number
   skipped?: boolean
+  oversized?: boolean
   title?: string
   message?: string
   uploadKind?: 'image' | 'stream-video'
@@ -172,6 +178,14 @@ type ImageUploadCompleteResponse = {
 }
 
 type QueueTaskStatus = 'in-stages' | 'completed' | 'failed'
+
+type ImageUploadSkippedResponse = {
+  ok: true
+  skipped: true
+  oversized: true
+  title: string
+  message: string
+}
 
 type QueueAddTaskResponse = {
   success: boolean
@@ -496,7 +510,7 @@ const uploadImage = async (
 
     uploadingFile.signedUrlResponse = signedUrlResponse
 
-    // 检查是否为跳过模式（重复文件）
+    // Duplicate and oversized-image policies can both skip before upload.
     if (signedUrlResponse.skipped) {
       uploadingFile.status = 'skipped'
       uploadingFile.progress = 100
@@ -589,11 +603,29 @@ const uploadImage = async (
             let imageUploadResponse: ImageUploadCompleteResponse | undefined
             if (!isStreamUpload) {
               try {
-                imageUploadResponse = xhr.responseText
-                  ? (JSON.parse(
-                      xhr.responseText,
-                    ) as ImageUploadCompleteResponse)
+                const parsedResponse = xhr.responseText
+                  ? (JSON.parse(xhr.responseText) as
+                      | ImageUploadCompleteResponse
+                      | ImageUploadSkippedResponse)
                   : undefined
+                if (
+                  parsedResponse &&
+                  'skipped' in parsedResponse &&
+                  parsedResponse.skipped
+                ) {
+                  uploadingFile.status = 'skipped'
+                  uploadingFile.error = parsedResponse.message
+                  uploadingFiles.value = new Map(uploadingFiles.value)
+                  toast.add({
+                    title: parsedResponse.title,
+                    description: parsedResponse.message,
+                    color: 'warning',
+                  })
+                  return
+                }
+                imageUploadResponse = parsedResponse as
+                  | ImageUploadCompleteResponse
+                  | undefined
               } catch {
                 imageUploadResponse = undefined
               }
@@ -698,12 +730,15 @@ const uploadImage = async (
             uploadingFiles.value = new Map(uploadingFiles.value)
           }
         },
-        onError: (error: string) => {
+        onError: (error: string, xhr: XMLHttpRequest) => {
           if (isStreamUpload) markStreamUploadFailed(streamTaskId)
 
           const isConflict = /\b409\b|Conflict/i.test(error)
 
-          if (isConflict) {
+          if (xhr.status === 413) {
+            uploadingFile.status = 'blocked'
+            uploadingFile.error = error
+          } else if (isConflict) {
             uploadingFile.status = 'blocked'
             uploadingFile.error = $t('upload.duplicate.block.message', {
               fileName,
@@ -734,7 +769,20 @@ const uploadImage = async (
         error.response?.status === 409) &&
       (error.data?.duplicate || /Conflict|409/i.test(error.message || ''))
 
-    if (isDuplicateConflict) {
+    const responseDetails = error.data?.data ?? error.data
+    const isOversized =
+      error.statusCode === 413 ||
+      error.status === 413 ||
+      error.response?.status === 413
+    if (isOversized) {
+      uploadingFile.status = 'blocked'
+      uploadingFile.error = responseDetails?.message || error.message
+      toast.add({
+        title: responseDetails?.title || $t('upload.oversized.blockedTitle'),
+        description: uploadingFile.error,
+        color: 'error',
+      })
+    } else if (isDuplicateConflict) {
       uploadingFile.status = 'blocked'
       uploadingFile.error =
         error.data.message || $t('upload.duplicate.block.message', { fileName })
@@ -841,8 +889,37 @@ watch(isBatchEditModalOpen, (open) => {
 })
 
 // 表格多选状态
-const rowSelection = ref({})
+const rowSelection = ref<Record<string, boolean>>({})
+const selectionAnchor = ref<string | null>(null)
 const table: any = useTemplateRef('table')
+const getPhotoRowId = (photo: Photo) => photo.id
+
+const setPhotoSelected = (
+  rowId: string,
+  checked: boolean,
+  extendRange = false,
+) => {
+  const rows: TableRow<Photo>[] =
+    table.value?.tableApi?.getRowModel().rows ?? []
+  const visibleIds = rows
+    .filter((row) => row.getCanSelect())
+    .map((row) => row.id)
+  const next = updatePhotoSelection(
+    rowSelection.value,
+    visibleIds,
+    selectionAnchor.value,
+    rowId,
+    checked,
+    extendRange,
+  )
+  rowSelection.value = next.selected
+  selectionAnchor.value = next.anchorId
+}
+
+const clearPhotoSelection = () => {
+  rowSelection.value = {}
+  selectionAnchor.value = null
+}
 
 // 列可见性状态
 const columnVisibility = ref({
@@ -1096,17 +1173,40 @@ const columns = computed<TableColumn<Photo>[]>(() => [
         modelValue: table.getIsSomePageRowsSelected()
           ? 'indeterminate'
           : table.getIsAllPageRowsSelected(),
-        'onUpdate:modelValue': (value: boolean | 'indeterminate') =>
-          table.toggleAllPageRowsSelected(!!value),
+        'onUpdate:modelValue': (value: boolean | 'indeterminate') => {
+          selectionAnchor.value = null
+          table.toggleAllPageRowsSelected(!!value)
+        },
         'aria-label': $t('dashboard.photos.table.selectAllAria'),
       }),
     cell: ({ row }) =>
-      h(UCheckbox, {
-        modelValue: row.getIsSelected(),
-        'onUpdate:modelValue': (value: boolean | 'indeterminate') =>
-          row.toggleSelected(!!value),
-        'aria-label': $t('dashboard.photos.table.selectRowAria'),
-      }),
+      h(
+        'span',
+        {
+          class: 'inline-flex select-none',
+          onMousedown: (event: MouseEvent) => {
+            if (event.shiftKey) event.preventDefault()
+          },
+          onClickCapture: (event: MouseEvent) => {
+            if (!event.shiftKey || !row.getCanSelect()) return
+            // Handle the range before Reka toggles the target checkbox, avoiding
+            // a second toggle from its update:modelValue event.
+            event.preventDefault()
+            event.stopPropagation()
+            setPhotoSelected(row.id, !row.getIsSelected(), true)
+          },
+        },
+        [
+          h(UCheckbox, {
+            modelValue: row.getIsSelected(),
+            disabled: !row.getCanSelect(),
+            'onUpdate:modelValue': (value: boolean | 'indeterminate') =>
+              setPhotoSelected(row.id, !!value),
+            'aria-label': $t('dashboard.photos.table.selectRowAria'),
+            title: $t('dashboard.photos.table.shiftSelectHint'),
+          }),
+        ],
+      ),
     enableHiding: false,
   },
   {
@@ -1431,8 +1531,6 @@ const validateFile = (
   ].some((ext) => file.name.toLowerCase().endsWith(ext))
   const isValidVideo = isVideoUploadFile(file)
   const isValidImage = isValidImageType || isValidImageExtension
-  const isJpegImage =
-    file.type.toLowerCase() === 'image/jpeg' || /\.jpe?g$/i.test(file.name)
 
   if (!isValidImage && !isValidVideo) {
     return {
@@ -1444,15 +1542,11 @@ const validateFile = (
     }
   }
 
-  // Images and videos use separate deployment-provided service limits.
-  // Non-image, non-video objects are stored in R2 by other upload flows.
-  const maxSize = isValidVideo
-    ? streamMaxUploadBytes
-    : isJpegImage
-      ? MOTION_PHOTO_SOURCE_MAX_UPLOAD_BYTES
-      : hostedImagesMaxUploadBytes
+  // Let the server apply the configured image policy and inspect Motion Photo
+  // payloads. Filtering images here would silently bypass skip/compress/block.
+  const maxSize = streamMaxUploadBytes
   const maxSizeMiB = bytesToMiB(maxSize)
-  if (file.size > maxSize) {
+  if (isValidVideo && file.size > maxSize) {
     return {
       valid: false,
       reason: 'file-too-large',
@@ -2177,7 +2271,7 @@ const saveBatchMetadataChanges = async () => {
       description: '',
       color: 'success',
     })
-    rowSelection.value = {}
+    clearPhotoSelection()
     await refresh()
     isBatchEditModalOpen.value = false
   } catch (error: any) {
@@ -2258,7 +2352,7 @@ const confirmDelete = async () => {
         color: 'success',
       })
 
-      rowSelection.value = {}
+      clearPhotoSelection()
     } else {
       const photo = targetPhotos[0]
       if (!photo) {
@@ -2369,7 +2463,7 @@ const handleBatchReprocess = async () => {
     }
 
     // 清空选中状态
-    rowSelection.value = {}
+    clearPhotoSelection()
   } catch (error: any) {
     console.error('批量处理失败:', error)
     toast.add({
@@ -2435,7 +2529,7 @@ const handleBatchEraseLocation = async () => {
         description: '',
         color: 'success',
       })
-      rowSelection.value = {}
+      clearPhotoSelection()
     } else {
       toast.add({
         title: $t('dashboard.photos.messages.batchEraseLocationFailed'),
@@ -2472,9 +2566,20 @@ type PhotoWithSourceFilename = Photo & {
 const getPhotoDownloadFilename = (
   photo: PhotoWithSourceFilename,
   contentType: string,
+  disposition: string | null,
 ) => {
-  const preferredName =
+  let preferredName =
     photo.sourceFilename?.trim() || photo.title?.trim() || `photo-${photo.id}`
+  // The stored image may have been transcoded by the oversize policy.
+  // Prefer the server's actual download filename over the original source name.
+  const encodedName = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encodedName) {
+    try {
+      preferredName = decodeURIComponent(encodedName)
+    } catch {
+      // Keep the source filename if an intermediary sent an invalid header.
+    }
+  }
   const leafName = preferredName.split(/[\\/]/).pop() || `photo-${photo.id}`
   const invalidFilenameCharacters = '<>:"/\\|?*'
   const safeName = Array.from(leafName, (character) =>
@@ -2562,7 +2667,11 @@ const handleBatchDownload = async () => {
         const url = window.URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.download = getPhotoDownloadFilename(photo, blob.type)
+        link.download = getPhotoDownloadFilename(
+          photo,
+          blob.type,
+          response.headers.get('content-disposition'),
+        )
         document.body.appendChild(link)
         link.click()
         document.body.removeChild(link)
@@ -2694,7 +2803,7 @@ onUnmounted(() => {
                 v-model="selectedFiles"
                 :label="$t('dashboard.photos.uploader.label')"
                 :description="
-                  $t('dashboard.photos.uploader.description', {
+                  $t('upload.oversized.uploaderHint', {
                     imageMaxSize: imageSourceMaxUploadMiB,
                     videoMaxSize: streamMaxUploadMiB,
                   })
@@ -2721,10 +2830,26 @@ onUnmounted(() => {
                   fileWrapper: 'min-w-0 flex-1',
                   fileName:
                     'text-sm font-medium text-neutral-700 dark:text-neutral-100 truncate',
-                  fileSize: 'text-xs text-neutral-500 dark:text-neutral-400',
+                  fileSize:
+                    'flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400',
                   fileTrailingButton: 'text-neutral-400 hover:text-error-500',
                 }"
-              />
+              >
+                <template #file-size="{ file }">
+                  <span>{{ formatBytes(file.size) }}</span>
+                  <UploadMetadataBadges
+                    v-if="!isVideoUploadFile(file)"
+                    :file="file"
+                  />
+                </template>
+              </UFileUpload>
+
+              <p
+                v-if="hasSelectedFiles"
+                class="text-xs text-neutral-500 dark:text-neutral-400"
+              >
+                {{ $t('upload.metadata.legend') }}
+              </p>
 
               <UCard
                 variant="soft"
@@ -2973,6 +3098,9 @@ onUnmounted(() => {
           </div>
 
           <!-- 照片列表 -->
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">
+            {{ $t('dashboard.photos.table.shiftSelectHint') }}
+          </p>
           <div class="relative flex-1 min-h-0 flex flex-col">
             <UTable
               ref="table"
@@ -2982,6 +3110,7 @@ onUnmounted(() => {
                 right: ['actions'],
               }"
               :data="filteredData as Photo[]"
+              :get-row-id="getPhotoRowId"
               :columns="columns"
               :loading="status === 'pending'"
               sticky

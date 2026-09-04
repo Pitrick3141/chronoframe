@@ -547,6 +547,30 @@
     "progress": {
       "calculating": "Calculating...",
       "seconds": "{seconds}s"
+    },
+    "oversized": {
+      "blockedTitle": "Image blocked",
+      "blockedMessage": "{fileName} exceeds the {maxSize} MiB image limit.",
+      "skippedTitle": "Image skipped",
+      "skippedMessage": "Skipped {fileName}: the image exceeds {maxSize} MiB.",
+      "compressionLimit": "Cannot compress {fileName}: static image input must be at most 20 MB (Motion Photo source at most 25 MiB). Compress it locally or choose Skip.",
+      "compressionFailed": "Could not compress {fileName} below {maxSize} MiB. This file was not uploaded.",
+      "compressed": "{fileName} was compressed from {before} MiB to {after} MiB and stored as WebP.",
+      "uploaderHint": "Stored images: up to {imageMaxSize} MiB; oversized images follow the system policy. Videos: up to {videoMaxSize} MiB."
+    },
+    "metadata": {
+      "group": "File metadata",
+      "camera": "Camera information",
+      "people": "People / author information",
+      "gps": "GPS information",
+      "reading": "Reading {label}…",
+      "present": "{label}: detected",
+      "absent": "{label}: not detected",
+      "unknown": "{label}: unavailable",
+      "unsupported": "{label}: this format is not supported for metadata inspection",
+      "tooLarge": "{label}: file exceeds the 100 MiB inspection limit",
+      "readError": "{label}: metadata could not be read completely",
+      "legend": "Camera, people/author and GPS icons show embedded file metadata. Colored = detected; gray = not detected; ? = unavailable. Checked locally before upload."
     }
   },
   "dashboard": {
@@ -610,7 +634,8 @@
         },
         "selectAllAria": "Select all",
         "selectRowAria": "Select row",
-        "thumbnailAlt": "Photo Thumbnail"
+        "thumbnailAlt": "Photo Thumbnail",
+        "shiftSelectHint": "Click a checkbox, then Shift-click another to select or clear the range in the current view."
       },
       "actions": {
         "reprocess": "Reprocess",
@@ -1172,6 +1197,18 @@
               "skip": "Skip",
               "warn": "Warn and overwrite",
               "block": "Block upload"
+            }
+          }
+        },
+        "oversizedImage": {
+          "mode": {
+            "label": "Oversized images",
+            "description": "Choose how to handle images above the storage limit.",
+            "help": "Block keeps the original unchanged and rejects this file. Skip ignores it and continues the batch. Compress stores a lossy WebP copy, reducing dimensions if needed, while retaining photo metadata. Compression accepts static images up to 20 MB; Motion Photo sources remain limited to 25 MiB. Compression failures block the file.",
+            "options": {
+              "compress": "Compress and upload",
+              "skip": "Skip",
+              "block": "Block"
             }
           }
         }

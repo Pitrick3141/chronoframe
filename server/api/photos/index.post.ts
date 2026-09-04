@@ -1,9 +1,12 @@
 import { eq, or } from 'drizzle-orm'
 import { z } from 'zod'
+import { HOSTED_IMAGE_MAX_BYTES } from '~~/server/services/cloudflare/hosted-images'
 import {
-  HOSTED_IMAGE_MAX_BYTES,
-  MOTION_PHOTO_SOURCE_MAX_BYTES,
-} from '~~/server/services/cloudflare/hosted-images'
+  getOversizedImageMode,
+  imageSourceMaxBytes,
+  oversizedImageError,
+  skippedOversizedImage,
+} from '~~/server/services/cloudflare/image-upload-policy'
 import { classifyMedia } from '~~/server/services/cloudflare/media-classification'
 import { cloudflareStream } from '~~/server/services/cloudflare/stream'
 import { createPendingStreamUploadTask } from '~~/server/services/cloudflare/stream-upload-task'
@@ -99,21 +102,32 @@ export default eventHandler(async (event) => {
 
   if (declaredSize !== undefined) {
     const cloudflareConfig = config.public.cloudflare
+    const imageMode =
+      uploadKind === 'image' ? await getOversizedImageMode() : 'block'
+    const hostedMaxBytes = Math.min(
+      cloudflareConfig.images.maxUploadBytes,
+      HOSTED_IMAGE_MAX_BYTES,
+    )
     const maxBytes =
       uploadKind === 'stream-video'
         ? Math.min(
             cloudflareConfig.stream.maxUploadBytes,
             STREAM_DIRECT_UPLOAD_MAX_BYTES,
           )
-        : contentType === 'image/jpeg'
-          ? MOTION_PHOTO_SOURCE_MAX_BYTES
-          : Math.min(
-              cloudflareConfig.images.maxUploadBytes,
-              HOSTED_IMAGE_MAX_BYTES,
-            )
+        : imageSourceMaxBytes(contentType, imageMode, hostedMaxBytes)
     const maxFileSizeMB = maxBytes / 1024 / 1024
 
     if (declaredSize > maxBytes) {
+      if (uploadKind === 'image') {
+        if (imageMode === 'skip')
+          return skippedOversizedImage(t, fileName, hostedMaxBytes)
+        throw oversizedImageError(
+          t,
+          fileName,
+          hostedMaxBytes,
+          imageMode === 'compress' ? 'compressionLimit' : 'blocked',
+        )
+      }
       throw createError({
         statusCode: 413,
         statusMessage: t('upload.error.tooLarge.title'),

@@ -2,7 +2,6 @@ import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 
 import {
   HOSTED_IMAGE_MAX_BYTES,
-  MOTION_PHOTO_SOURCE_MAX_BYTES,
   hostedImages,
   type HostedImageDetails,
 } from '~~/server/services/cloudflare/hosted-images'
@@ -18,6 +17,14 @@ import {
 } from '~~/server/services/cloudflare/finalize-upload'
 import { extractMotionPhotoVideo } from '~~/server/services/video/motion-photo'
 import { extractExifData } from '~~/server/services/image/exif'
+import { compressImageForUpload } from '~~/server/services/cloudflare/image-compression'
+import {
+  getOversizedImageMode,
+  imageSourceMaxBytes,
+  IMAGE_COMPRESSION_MAX_INPUT_BYTES,
+  oversizedImageError,
+  skippedOversizedImage,
+} from '~~/server/services/cloudflare/image-upload-policy'
 import { requireAdminSession } from '~~/server/utils/auth'
 import { tables, useDB, type ImageUploadIntent } from '~~/server/utils/db'
 import { logger } from '~~/server/utils/logger'
@@ -575,9 +582,21 @@ export default eventHandler(async (event) => {
     HOSTED_IMAGE_MAX_BYTES,
   )
   const isJpeg = intent.contentType === 'image/jpeg'
-  const sourceMaxBytes = isJpeg ? MOTION_PHOTO_SOURCE_MAX_BYTES : hostedMaxBytes
+  const imageMode = await getOversizedImageMode()
+  const sourceMaxBytes = imageSourceMaxBytes(
+    intent.contentType,
+    imageMode,
+    hostedMaxBytes,
+  )
   if (intent.expectedSize > sourceMaxBytes) {
-    throw tooLargeError(t, intent.expectedSize, sourceMaxBytes / 1024 / 1024)
+    if (imageMode === 'skip')
+      return skippedOversizedImage(t, intent.filename, hostedMaxBytes)
+    throw oversizedImageError(
+      t,
+      intent.filename,
+      hostedMaxBytes,
+      imageMode === 'compress' ? 'compressionLimit' : 'blocked',
+    )
   }
 
   const requestBody = toWebRequest(event).body
@@ -689,7 +708,96 @@ export default eventHandler(async (event) => {
           statusMessage: 'Motion Photo contains no static JPEG bytes',
         })
       }
+    }
 
+    // Apply the policy to the static image before creating/uploading a Stream
+    // companion. Failed or skipped images must not leave a new video behind.
+    const exif = await extractExifData(imageBytes, rawBytes, logger.image)
+    let compressedWarning: string | undefined
+    let storedContentType = intent.contentType
+    let storedFilename = intent.filename
+    if (imageBytes.byteLength > hostedMaxBytes) {
+      if (imageMode === 'skip') {
+        if (streamId && (await deleteStreamBestEffort(streamId)))
+          streamId = null
+        const skipped = skippedOversizedImage(
+          t,
+          intent.filename,
+          hostedMaxBytes,
+        )
+        await db
+          .update(tables.imageUploadIntents)
+          .set({
+            status: 'failed',
+            embeddedStreamId: streamId,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            lastError: skipped.message,
+            failedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(tables.imageUploadIntents.id, intent.id),
+              eq(tables.imageUploadIntents.leaseToken, leaseToken),
+            ),
+          )
+          .run()
+        return skipped
+      }
+      if (imageMode === 'block')
+        throw oversizedImageError(t, intent.filename, hostedMaxBytes)
+      if (imageBytes.byteLength > IMAGE_COMPRESSION_MAX_INPUT_BYTES) {
+        throw oversizedImageError(
+          t,
+          intent.filename,
+          hostedMaxBytes,
+          'compressionLimit',
+        )
+      }
+      const originalSize = imageBytes.byteLength
+      try {
+        imageBytes = await compressImageForUpload(imageBytes, hostedMaxBytes)
+      } catch (error) {
+        logger.image.warn('Image compression failed:', error)
+        throw oversizedImageError(
+          t,
+          intent.filename,
+          hostedMaxBytes,
+          'compressionFailed',
+        )
+      }
+      storedContentType = 'image/webp'
+      storedFilename = `${intent.filename.replace(/\.[^.]+$/, '')}.webp`
+      compressedWarning = t('upload.oversized.compressed', {
+        fileName: intent.filename,
+        before: (originalSize / 1024 / 1024).toFixed(2),
+        after: (imageBytes.byteLength / 1024 / 1024).toFixed(2),
+      })
+      // Compression removes binary EXIF. Persist the original metadata before
+      // writing either media asset so creator-based recovery can retain it.
+      const savedMetadata = await db
+        .update(tables.imageUploadIntents)
+        .set({ exif, updatedAt: new Date() })
+        .where(
+          and(
+            eq(tables.imageUploadIntents.id, intent.id),
+            eq(tables.imageUploadIntents.status, 'uploading'),
+            eq(tables.imageUploadIntents.leaseToken, leaseToken),
+          ),
+        )
+        .returning({ id: tables.imageUploadIntents.id })
+        .get()
+      if (!savedMetadata) {
+        throw createError({
+          statusCode: 409,
+          statusMessage:
+            'Image upload lease was lost before metadata persistence',
+        })
+      }
+    }
+
+    if (extraction.status === 'extracted') {
       if (streamId) {
         const priorStreamId = streamId
         let reusable = false
@@ -793,13 +901,13 @@ export default eventHandler(async (event) => {
       )
     }
 
-    const exif = await extractExifData(imageBytes, rawBytes, logger.image)
     const sourceMetadata = {
       uploadIntentId: intent.id,
       sourceFilename: intent.filename,
       sourceMimeType: intent.contentType,
       sourceSize: String(intent.expectedSize),
       staticSourceSize: String(imageBytes.byteLength),
+      ...(compressedWarning ? { compression: 'webp' } : {}),
       ...(intent.lastModified ? { lastModified: intent.lastModified } : {}),
       ...(streamId ? { embeddedStreamId: streamId } : {}),
       ...(extraction.status === 'extracted' &&
@@ -815,8 +923,8 @@ export default eventHandler(async (event) => {
     let uploaded
     try {
       uploaded = await hostedImages.upload(imageBytes, {
-        filename: intent.filename,
-        contentType: intent.contentType,
+        filename: storedFilename,
+        contentType: storedContentType,
         creator: intent.id,
         metadata: sourceMetadata,
       })
@@ -892,7 +1000,13 @@ export default eventHandler(async (event) => {
       })
     }
 
-    return completeUploadResponse(db, persisted, false)
+    const response = await completeUploadResponse(db, persisted, false)
+    return {
+      ...response,
+      warning:
+        [compressedWarning, response.warning].filter(Boolean).join(' ') ||
+        undefined,
+    }
   } catch (error) {
     // Once a Hosted Image has committed, the inner branch intentionally
     // leaves the D1 lease intact for creator-based recovery. All other errors

@@ -536,7 +536,8 @@
         },
         "selectAllAria": "すべて選択",
         "selectRowAria": "行を選択",
-        "thumbnailAlt": "写真サムネイル"
+        "thumbnailAlt": "写真サムネイル",
+        "shiftSelectHint": "チェックボックスを選んでからShiftキーを押しながら別の項目をクリックすると、表示順の範囲を選択・解除できます。"
       },
       "actions": {
         "reprocess": "再処理",
@@ -1100,6 +1101,18 @@
               "block": "アップロードを拒否"
             }
           }
+        },
+        "oversizedImage": {
+          "mode": {
+            "label": "サイズ超過画像の処理",
+            "description": "保存サイズ上限を超える画像の処理方法を選択します。",
+            "help": "ブロックは対象ファイルを拒否します。スキップはそのファイルを飛ばして一括アップロードを続けます。圧縮は写真情報を保持し、必要に応じて寸法を縮小して非可逆 WebP で保存します。保存される原画像は圧縮版に置き換わります。静止画は最大20 MB、Motion Photo全体は最大25 MiBです。圧縮に失敗したファイルはブロックされます。",
+            "options": {
+              "compress": "圧縮してアップロード",
+              "skip": "スキップ",
+              "block": "ブロック"
+            }
+          }
         }
       },
       "webglImageViewerDebug": {
@@ -1641,6 +1654,30 @@
     "progress": {
       "calculating": "計算中...",
       "seconds": "{seconds}秒"
+    },
+    "oversized": {
+      "blockedTitle": "画像をブロックしました",
+      "blockedMessage": "{fileName} は画像の上限 {maxSize} MiB を超えています。",
+      "skippedTitle": "画像をスキップしました",
+      "skippedMessage": "{fileName} は {maxSize} MiB を超えているためスキップしました。",
+      "compressionLimit": "{fileName} を圧縮できません。静止画は最大20 MB、Motion Photo全体は最大25 MiBです。事前に圧縮するか、スキップを選択してください。",
+      "compressionFailed": "{fileName} を {maxSize} MiB 以下に圧縮できませんでした。このファイルはアップロードされていません。",
+      "compressed": "{fileName} を {before} MiB から {after} MiB に圧縮し、WebPで保存しました。",
+      "uploaderHint": "画像の保存上限は {imageMaxSize} MiB（超過時はシステム設定に従います）。動画は最大 {videoMaxSize} MiB。"
+    },
+    "metadata": {
+      "group": "ファイルのメタデータ",
+      "camera": "カメラ情報",
+      "people": "人物・作者情報",
+      "gps": "GPS情報",
+      "reading": "{label}を読み取り中…",
+      "present": "{label}：検出済み",
+      "absent": "{label}：未検出",
+      "unknown": "{label}：確認できません",
+      "unsupported": "{label}：この形式のメタデータ確認には対応していません",
+      "tooLarge": "{label}：確認できるファイルサイズの上限100 MiBを超えています",
+      "readError": "{label}：メタデータを完全に読み取れませんでした",
+      "legend": "カメラ、人物・作者、GPSのアイコンはファイル内のメタデータを示します。カラーは検出済み、グレーは未検出、?は確認不能です。アップロード前に端末内だけで確認します。"
     }
   },
   "photo": {

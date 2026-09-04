@@ -183,6 +183,8 @@ async function finalizePhoto(
   const sourceSize =
     finiteNumber(metadataValue(metadata, 'sourceSize', 'size')) ??
     finiteNumber(item.fileSize ?? item.size ?? info.fileSize)
+  const storedFileSize =
+    finiteNumber(item.fileSize ?? item.size ?? info.fileSize) ?? sourceSize
   const width = finiteNumber(item.width ?? info.width)
   const height = finiteNumber(item.height ?? info.height)
   const lastModified =
@@ -242,7 +244,7 @@ async function finalizePhoto(
     aspectRatio: width && height ? width / height : null,
     storageKey: imageId,
     thumbnailKey: null,
-    fileSize: sourceSize,
+    fileSize: storedFileSize,
     sourceFilename,
     sourceMimeType,
     sourceSize,
@@ -271,7 +273,7 @@ async function finalizePhoto(
         aspectRatio: width && height ? width / height : null,
         storageKey: imageId,
         thumbnailKey: null,
-        fileSize: sourceSize,
+        fileSize: storedFileSize,
         sourceFilename,
         sourceMimeType,
         sourceSize,

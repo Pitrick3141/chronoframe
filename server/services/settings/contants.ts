@@ -94,6 +94,16 @@ export const DEFAULT_SETTINGS = [
   },
   {
     namespace: 'system',
+    key: 'upload.oversizedImage.mode',
+    type: 'string',
+    defaultValue: 'block',
+    enum: ['compress', 'skip', 'block'] as const,
+    label: 'settings.system.upload.oversizedImage.mode.label',
+    description: 'settings.system.upload.oversizedImage.mode.description',
+    isPublic: true,
+  },
+  {
+    namespace: 'system',
     key: 'webglImageViewerDebug',
     type: 'boolean',
     defaultValue: false,

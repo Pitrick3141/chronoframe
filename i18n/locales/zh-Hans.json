@@ -547,6 +547,30 @@
     "progress": {
       "calculating": "计算中...",
       "seconds": "{seconds}秒"
+    },
+    "oversized": {
+      "blockedTitle": "图片已阻止",
+      "blockedMessage": "{fileName} 超过 {maxSize} MiB 的图片上限。",
+      "skippedTitle": "图片已跳过",
+      "skippedMessage": "已跳过 {fileName}：图片超过 {maxSize} MiB。",
+      "compressionLimit": "无法压缩 {fileName}：静态图片最多 20 MB，Motion Photo 总文件最多 25 MiB。请先在本地压缩，或选择跳过。",
+      "compressionFailed": "未能将 {fileName} 压缩至 {maxSize} MiB 以内，该文件未上传。",
+      "compressed": "{fileName} 已从 {before} MiB 压缩至 {after} MiB，并以 WebP 保存。",
+      "uploaderHint": "存储图片最多 {imageMaxSize} MiB，超限按系统设置处理；视频最多 {videoMaxSize} MiB。"
+    },
+    "metadata": {
+      "group": "文件元数据",
+      "camera": "相机信息",
+      "people": "人物／作者信息",
+      "gps": "GPS 信息",
+      "reading": "正在读取{label}…",
+      "present": "{label}：已检测到",
+      "absent": "{label}：未检测到",
+      "unknown": "{label}：无法检测",
+      "unsupported": "{label}：暂不支持检测此格式的元数据",
+      "tooLarge": "{label}：文件超过 100 MiB 检测上限",
+      "readError": "{label}：无法完整读取元数据",
+      "legend": "相机、人物／作者和 GPS 标记表示文件内的元数据。亮色为已检测到，灰色为未检测到，问号为无法检测；确认上传前仅在本机读取。"
     }
   },
   "dashboard": {
@@ -610,7 +634,8 @@
         },
         "selectAllAria": "全选",
         "selectRowAria": "选择行",
-        "thumbnailAlt": "照片缩略图"
+        "thumbnailAlt": "照片缩略图",
+        "shiftSelectHint": "先点击一个复选框，再按住 Shift 点击另一个，可按当前显示顺序连续选中或取消选中。"
       },
       "actions": {
         "reprocess": "重新处理",
@@ -1171,6 +1196,18 @@
             "options": {
               "skip": "跳过",
               "warn": "警告并覆盖",
+              "block": "阻止上传"
+            }
+          }
+        },
+        "oversizedImage": {
+          "mode": {
+            "label": "超大图片处理",
+            "description": "选择图片超过存储上限时的处理方式。",
+            "help": "阻止：拒绝当前文件；跳过：忽略该文件并继续批量上传；压缩：转为有损 WebP，必要时缩小尺寸，并保留照片信息。压缩版会替代上传的原始图片。静态图片最多 20 MB，Motion Photo 总文件仍最多 25 MiB；压缩失败时阻止该文件。",
+            "options": {
+              "compress": "压缩后上传",
+              "skip": "跳过",
               "block": "阻止上传"
             }
           }

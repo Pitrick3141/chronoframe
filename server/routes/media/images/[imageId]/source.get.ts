@@ -19,10 +19,16 @@ export default defineEventHandler(async (event) => {
   ])
   if (!bytes) throwImageNotFound()
 
+  const downloadFilename =
+    details?.meta?.compression === 'webp'
+      ? details.filename ||
+        `${(photo.sourceFilename || `photo-${photo.id}`).replace(/\.[^.]+$/, '')}.webp`
+      : photo.sourceFilename
+
   const headers = new Headers({
     'Cache-Control': 'private, no-store, max-age=0',
     'Content-Disposition': attachmentDisposition(
-      photo.sourceFilename,
+      downloadFilename,
       `photo-${photo.id}`,
     ),
     'Content-Security-Policy': "default-src 'none'; sandbox",

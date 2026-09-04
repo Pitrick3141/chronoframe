@@ -63,3 +63,21 @@ NUXT_UPLOAD_MIME_WHITELIST=image/jpeg,image/png,image/webp,image/gif,image/svg+x
 `STREAM` 是 capability binding，不需要应用 token 或额外 CI secret。Stream 按视频存储分钟和传输分钟计费。
 
 Node/Docker 版本中的 storage-provider 变量（`NUXT_STORAGE_PROVIDER`、`NUXT_PROVIDER_S3_*`、`NUXT_PROVIDER_LOCAL_*` 与 `NUXT_PROVIDER_OPENLIST_*`）已经废弃，详见 [Cloudflare 存储绑定](/zh/configuration/storage-providers)。
+
+## 超大图片处理
+
+在 **系统设置 → 文件处理 → 超大图片处理** 选择策略，对应设置键 `system:upload.oversizedImage.mode`：
+
+- **阻止上传（默认）**：拒绝超限图片，队列显示“被阻止”；其他文件继续处理。
+- **跳过**：忽略超限图片，队列显示“已跳过”，不创建图片或视频资源。
+- **压缩后上传**：使用 Images binding 转换为 WebP，逐步降低质量，必要时缩小尺寸；只在最终文件小于等于 Hosted Images 上限后保存。队列显示压缩前后大小，下载使用 `.webp` 扩展名。原始文件名仍用于重名检测，EXIF 照片信息会单独保留。
+
+Hosted Images 存储上限仍是 **10 MiB**。压缩输入的静态图片最多 **20 MB（20,000,000 字节）**；Motion Photo 的整个文件最多 **25 MiB**，会先拆出视频，再检查或压缩静态图片，视频仍由 Stream 处理。压缩结果会替代原始图片二进制；超出处理上限或压缩失败会阻止该文件，避免静默降低为其他策略。限制来源见 [Cloudflare Images 限制](https://developers.cloudflare.com/images/get-started/limits/)。
+
+新设置由设置管理器初始化到 D1，无需新增数据库结构迁移。保存后对后续上传生效。
+
+## 上传前的元数据标记
+
+选择图片后，每个文件大小旁会显示相机、人物／作者、GPS 三个小图标。亮色表示检测到对应信息，灰色表示未检测到；问号表示该格式暂不支持、文件过大或元数据读取失败。悬停或键盘聚焦可查看说明。
+
+人物／作者信息包括文件中已有的作者、版权、人物姓名及人脸区域标签。检测在浏览器本地读取 EXIF、IPTC、XMP 等元数据，在确认上传前不会发送图片或元数据。GIF/SVG 等无法可靠解析的格式显示问号；超过 100 MiB 的文件也不进行预检。每次最多同时读取两个文件，移除文件或关闭上传面板会取消剩余检测。
