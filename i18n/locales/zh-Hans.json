@@ -625,7 +625,8 @@
         "batchReprocess": "重新处理",
         "batchEraseLocation": "清除 ChronoFrame 位置元数据",
         "batchDownload": "批量下载",
-        "batchDelete": "批量删除"
+        "batchDelete": "批量删除",
+        "batchEditMetadata": "批量编辑信息"
       },
       "slideover": {
         "title": "上传照片",
@@ -723,7 +724,9 @@
         "batchEraseLocationFailed": "批量位置元数据清除任务添加失败",
         "taskSubmitFailed": "提交任务失败",
         "taskStatusCheckFailed": "检查任务状态失败",
-        "uploadFailed": "上传失败"
+        "uploadFailed": "上传失败",
+        "batchMetadataUpdateSuccess": "已更新 {count} 张照片的信息",
+        "batchMetadataUpdateFailed": "批量更新照片信息失败"
       },
       "errors": {
         "noSelection": "请选择要上传的照片",
@@ -830,7 +833,35 @@
           "goToQueue": "队列管理"
         }
       },
-      "previewTitle": "照片预览"
+      "previewTitle": "照片预览",
+      "batchEditModal": {
+        "title": "批量编辑照片信息",
+        "description": "将选中的信息修改应用到 {count} 张照片。",
+        "fields": {
+          "tags": "编辑标签",
+          "tagMode": "标签操作",
+          "tagValues": "标签",
+          "tagsHint": "按 Enter 添加标签；添加或移除时至少需要一个标签。",
+          "replaceTagsHint": "替换原有的全部标签；留空可清除所有已选照片的标签。",
+          "location": "设置相同的 GPS 位置",
+          "locationPickerHint": "点击地图选择位置。",
+          "coordinates": "坐标",
+          "noLocation": "未选择位置",
+          "locationHint": "修改 GPS 坐标会清除原有城市；如需保留城市，请同时在下方设置。",
+          "city": "设置相同的城市",
+          "cityPlaceholder": "输入城市",
+          "cityHint": "留空可清除所有已选照片的城市。"
+        },
+        "tagModes": {
+          "add": "添加到现有标签",
+          "remove": "移除匹配的标签",
+          "replace": "替换全部标签"
+        },
+        "actions": {
+          "cancel": "取消",
+          "apply": "应用更改"
+        }
+      }
     },
     "albums": {
       "title": "相簿管理",

@@ -7,6 +7,7 @@ import {
 import { streamManifestPath } from '../../utils/photo-response'
 import { hostedImages } from './hosted-images'
 import { cloudflareStream, type StreamVideoDetails } from './stream'
+import { extractPhotoInfo } from '../image/exif'
 
 export type WorkersPipelinePayload =
   | {
@@ -186,8 +187,20 @@ async function finalizePhoto(
   const height = finiteNumber(item.height ?? info.height)
   const lastModified =
     typeof item.uploaded === 'string' ? item.uploaded : new Date().toISOString()
-  const dateTaken =
+  const fallbackDateTaken =
     metadataValue(metadata, 'dateTaken', 'lastModified') ?? lastModified
+
+  const uploadIntent = await db
+    .select({
+      id: tables.imageUploadIntents.id,
+      imageId: tables.imageUploadIntents.imageId,
+      embeddedStreamId: tables.imageUploadIntents.embeddedStreamId,
+      status: tables.imageUploadIntents.status,
+      exif: tables.imageUploadIntents.exif,
+    })
+    .from(tables.imageUploadIntents)
+    .where(eq(tables.imageUploadIntents.imageId, imageId))
+    .get()
 
   const existing = await db
     .select({
@@ -198,7 +211,10 @@ async function finalizePhoto(
     .where(eq(tables.photos.id, imageId))
     .get()
 
-  const exif = record(existing?.exif)
+  const uploadedExif = record(uploadIntent?.exif)
+  const existingExif = record(existing?.exif)
+  const exif =
+    Object.keys(uploadedExif).length > 0 ? uploadedExif : existingExif
   const sanitizedExif = eraseLocation
     ? Object.fromEntries(
         Object.entries(exif).filter(
@@ -207,10 +223,20 @@ async function finalizePhoto(
       )
     : exif
 
+  const photoInfo = extractPhotoInfo(sourceFilename, sanitizedExif)
+  const filenameDate =
+    sourceBasename(sourceFilename).match(/(\d{4}-\d{2}-\d{2})/)
+  const dateTaken =
+    sanitizedExif.DateTimeOriginal || filenameDate
+      ? photoInfo.dateTaken
+      : fallbackDateTaken
+  const coordinates = eraseLocation ? {} : parseGPSCoordinates(sanitizedExif)
+
   const values = {
     id: imageId,
     cloudflareImageId: imageId,
-    title: sourceBasename(sourceFilename),
+    title: photoInfo.title,
+    description: photoInfo.description,
     width,
     height,
     aspectRatio: width && height ? width / height : null,
@@ -224,17 +250,13 @@ async function finalizePhoto(
     lastModified,
     originalUrl: hostedImageUrl(imageId),
     thumbnailUrl: hostedImageUrl(imageId, true),
-    tags: [],
+    tags: photoInfo.tags,
     exif: sanitizedExif,
-    ...(eraseLocation
-      ? {
-          latitude: null,
-          longitude: null,
-          country: null,
-          city: null,
-          locationName: null,
-        }
-      : {}),
+    latitude: eraseLocation ? null : (coordinates.latitude ?? null),
+    longitude: eraseLocation ? null : (coordinates.longitude ?? null),
+    country: null,
+    city: null,
+    locationName: null,
   }
 
   await db
@@ -279,17 +301,6 @@ async function finalizePhoto(
         }
       : {}),
   }
-
-  const uploadIntent = await db
-    .select({
-      id: tables.imageUploadIntents.id,
-      imageId: tables.imageUploadIntents.imageId,
-      embeddedStreamId: tables.imageUploadIntents.embeddedStreamId,
-      status: tables.imageUploadIntents.status,
-    })
-    .from(tables.imageUploadIntents)
-    .where(eq(tables.imageUploadIntents.imageId, imageId))
-    .get()
 
   if (uploadIntent) {
     const finalizedAt = new Date()

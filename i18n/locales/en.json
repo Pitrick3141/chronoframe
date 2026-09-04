@@ -625,7 +625,8 @@
         "batchReprocess": "Reprocess",
         "batchEraseLocation": "Clear ChronoFrame location metadata",
         "batchDownload": "Download",
-        "batchDelete": "Batch Delete"
+        "batchDelete": "Batch Delete",
+        "batchEditMetadata": "Edit Metadata"
       },
       "slideover": {
         "title": "Upload Photos",
@@ -723,7 +724,9 @@
         "batchEraseLocationFailed": "Failed to queue location metadata clearing tasks",
         "taskSubmitFailed": "Failed to submit task",
         "taskStatusCheckFailed": "Failed to check task status",
-        "uploadFailed": "Upload failed"
+        "uploadFailed": "Upload failed",
+        "batchMetadataUpdateSuccess": "Updated metadata for {count} photos",
+        "batchMetadataUpdateFailed": "Failed to update photo metadata in batch"
       },
       "errors": {
         "noSelection": "Please select photos to upload",
@@ -830,7 +833,35 @@
           "goToQueue": "Queue Management"
         }
       },
-      "previewTitle": "Photo Preview"
+      "previewTitle": "Photo Preview",
+      "batchEditModal": {
+        "title": "Edit metadata in batch",
+        "description": "Apply selected metadata changes to {count} photos.",
+        "fields": {
+          "tags": "Update tags",
+          "tagMode": "Tag operation",
+          "tagValues": "Tags",
+          "tagsHint": "Press Enter to add each tag. At least one tag is required.",
+          "replaceTagsHint": "Replace all existing tags. Leave empty to clear tags from every selected photo.",
+          "location": "Set the same GPS location",
+          "locationPickerHint": "Click on the map to choose a location.",
+          "coordinates": "Coordinates",
+          "noLocation": "No location selected",
+          "locationHint": "Changing GPS coordinates clears the existing city unless city is also enabled below.",
+          "city": "Set the same city",
+          "cityPlaceholder": "Enter a city",
+          "cityHint": "Leave empty to clear the city from every selected photo."
+        },
+        "tagModes": {
+          "add": "Add to existing tags",
+          "remove": "Remove matching tags",
+          "replace": "Replace all tags"
+        },
+        "actions": {
+          "cancel": "Cancel",
+          "apply": "Apply changes"
+        }
+      }
     },
     "albums": {
       "title": "Album Management",

@@ -1,0 +1,1 @@
+ALTER TABLE `image_upload_intents` ADD `exif` text;

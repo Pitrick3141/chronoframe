@@ -551,7 +551,8 @@
         "batchReprocess": "批量重新處理",
         "batchEraseLocation": "清除 ChronoFrame 位置中繼資料",
         "batchDownload": "批量下載",
-        "batchDelete": "批量刪除"
+        "batchDelete": "批量刪除",
+        "batchEditMetadata": "批量編輯資訊"
       },
       "slideover": {
         "title": "上傳照片",
@@ -649,7 +650,9 @@
         "batchEraseLocationFailed": "批次位置中繼資料清除任務新增失敗",
         "taskSubmitFailed": "提交任務失敗",
         "taskStatusCheckFailed": "檢查任務狀態失敗",
-        "uploadFailed": "上傳失敗"
+        "uploadFailed": "上傳失敗",
+        "batchMetadataUpdateSuccess": "已更新 {count} 張照片的資訊",
+        "batchMetadataUpdateFailed": "批量更新照片資訊失敗"
       },
       "errors": {
         "noSelection": "請選擇照片進行上傳",
@@ -756,7 +759,35 @@
           "goToQueue": "佇列管理"
         }
       },
-      "previewTitle": "照片預覽"
+      "previewTitle": "照片預覽",
+      "batchEditModal": {
+        "title": "批量編輯照片資訊",
+        "description": "將選取的資訊變更套用到 {count} 張照片。",
+        "fields": {
+          "tags": "編輯標籤",
+          "tagMode": "標籤操作",
+          "tagValues": "標籤",
+          "tagsHint": "按 Enter 新增標籤；新增或移除時至少需要一個標籤。",
+          "replaceTagsHint": "取代原有的全部標籤；留空可清除所有已選照片的標籤。",
+          "location": "設定相同的 GPS 位置",
+          "locationPickerHint": "點擊地圖選擇位置。",
+          "coordinates": "座標",
+          "noLocation": "未選擇位置",
+          "locationHint": "變更 GPS 座標會清除原有城市；如需保留城市，請同時在下方設定。",
+          "city": "設定相同的城市",
+          "cityPlaceholder": "輸入城市",
+          "cityHint": "留空可清除所有已選照片的城市。"
+        },
+        "tagModes": {
+          "add": "新增至現有標籤",
+          "remove": "移除相符的標籤",
+          "replace": "取代全部標籤"
+        },
+        "actions": {
+          "cancel": "取消",
+          "apply": "套用變更"
+        }
+      }
     },
     "albums": {
       "title": "相簿管理",

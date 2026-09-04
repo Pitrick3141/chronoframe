@@ -551,7 +551,8 @@
         "batchReprocess": "一括再処理",
         "batchEraseLocation": "ChronoFrame の位置メタデータを消去",
         "batchDownload": "一括ダウンロード",
-        "batchDelete": "一括削除"
+        "batchDelete": "一括削除",
+        "batchEditMetadata": "メタデータを一括編集"
       },
       "slideover": {
         "title": "写真をアップロード",
@@ -649,7 +650,9 @@
         "batchEraseLocationFailed": "位置メタデータ消去タスクの一括追加に失敗しました",
         "taskSubmitFailed": "タスクの送信に失敗しました",
         "taskStatusCheckFailed": "タスク状態の確認に失敗しました",
-        "uploadFailed": "アップロードに失敗しました"
+        "uploadFailed": "アップロードに失敗しました",
+        "batchMetadataUpdateSuccess": "{count}枚の写真のメタデータを更新しました",
+        "batchMetadataUpdateFailed": "写真のメタデータを一括更新できませんでした"
       },
       "errors": {
         "noSelection": "アップロードする写真を選択してください",
@@ -756,7 +759,35 @@
           "goToQueue": "キュー管理"
         }
       },
-      "previewTitle": "写真プレビュー"
+      "previewTitle": "写真プレビュー",
+      "batchEditModal": {
+        "title": "写真のメタデータを一括編集",
+        "description": "選択した変更を{count}枚の写真に適用します。",
+        "fields": {
+          "tags": "タグを編集",
+          "tagMode": "タグ操作",
+          "tagValues": "タグ",
+          "tagsHint": "Enter キーでタグを追加します。追加または削除には1つ以上のタグが必要です。",
+          "replaceTagsHint": "既存のタグをすべて置換します。空欄にすると選択した写真のタグをすべて消去します。",
+          "location": "同じ GPS 位置を設定",
+          "locationPickerHint": "地図をクリックして位置を選択します。",
+          "coordinates": "座標",
+          "noLocation": "位置が選択されていません",
+          "locationHint": "GPS 座標を変更すると既存の都市が消去されます。都市を残す場合は下でも設定してください。",
+          "city": "同じ都市を設定",
+          "cityPlaceholder": "都市を入力",
+          "cityHint": "空欄にすると選択したすべての写真から都市を消去します。"
+        },
+        "tagModes": {
+          "add": "既存のタグに追加",
+          "remove": "一致するタグを削除",
+          "replace": "すべてのタグを置換"
+        },
+        "actions": {
+          "cancel": "キャンセル",
+          "apply": "変更を適用"
+        }
+      }
     },
     "albums": {
       "title": "アルバム管理",

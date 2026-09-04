@@ -17,6 +17,7 @@ import {
   type QueueFinalizeResult,
 } from '~~/server/services/cloudflare/finalize-upload'
 import { extractMotionPhotoVideo } from '~~/server/services/video/motion-photo'
+import { extractExifData } from '~~/server/services/image/exif'
 import { requireAdminSession } from '~~/server/utils/auth'
 import { tables, useDB, type ImageUploadIntent } from '~~/server/utils/db'
 import { logger } from '~~/server/utils/logger'
@@ -792,6 +793,7 @@ export default eventHandler(async (event) => {
       )
     }
 
+    const exif = await extractExifData(imageBytes, rawBytes, logger.image)
     const sourceMetadata = {
       uploadIntentId: intent.id,
       sourceFilename: intent.filename,
@@ -836,6 +838,7 @@ export default eventHandler(async (event) => {
           imageId: uploaded.id,
           embeddedStreamId: streamId,
           actualSize: uploaded.fileSize,
+          exif,
           leaseToken: null,
           leaseExpiresAt: null,
           lastError: null,

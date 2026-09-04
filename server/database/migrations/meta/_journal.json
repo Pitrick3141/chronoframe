@@ -106,6 +106,13 @@
       "when": 1784253000000,
       "tag": "0014_private_image_upload_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1788506637998,
+      "tag": "0015_image_upload_intents_exif",
+      "breakpoints": true
     }
   ]
 }

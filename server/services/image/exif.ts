@@ -1,18 +1,35 @@
 import type { NeededExif, PhotoInfo } from '../../../shared/types/photo'
+import { compactExif, parseJpegMetadata, setExif } from './jpeg-metadata.js'
 
-/**
- * Native ExifTool/Sharp extraction is not available in a Worker isolate.
- * Upload processing stores metadata supplied by Cloudflare Images instead.
- */
 export const extractExifData = async (
-  _imageBytes: Uint8Array,
-  _rawImageBytes?: Uint8Array,
+  imageBytes: Uint8Array,
+  rawImageBytes?: Uint8Array,
   log?: Logger[keyof Logger],
 ): Promise<NeededExif | null> => {
-  log?.debug(
-    'Native EXIF extraction is unavailable on Workers; keeping existing metadata.',
-  )
-  return null
+  try {
+    const metadata =
+      parseJpegMetadata(imageBytes) ??
+      (rawImageBytes ? parseJpegMetadata(rawImageBytes) : null)
+    if (!metadata) {
+      log?.debug('No Worker-compatible JPEG EXIF metadata found.')
+      return null
+    }
+    const exif: Record<string, unknown> = {
+      ...(metadata.xmp ?? {}),
+      ...(metadata.exif ?? {}),
+    }
+    setExif(exif, 'ImageWidth', exif.ImageWidth ?? metadata.width)
+    setExif(exif, 'ImageHeight', exif.ImageHeight ?? metadata.height)
+    setExif(exif, 'ColorSpace', exif.ColorSpace ?? metadata.colorSpace)
+    if (!exif.ColorSpace) exif.ColorSpace = 'sRGB'
+    const result = compactExif(exif) as NeededExif | null
+    if (result)
+      log?.debug('Extracted JPEG EXIF metadata in Worker-compatible parser.')
+    return result
+  } catch (error) {
+    log?.warn('Worker-compatible EXIF extraction failed:', error)
+    return null
+  }
 }
 
 const basenameWithoutExtension = (key: string): string => {

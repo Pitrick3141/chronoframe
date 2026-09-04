@@ -359,6 +359,79 @@ const formattedCoordinates = computed(() => {
   }
 })
 
+type BatchTagMode = 'add' | 'remove' | 'replace'
+interface BatchMetadataFormState {
+  updateTags: boolean
+  tagMode: BatchTagMode
+  tags: string[]
+  updateLocation: boolean
+  updateCity: boolean
+  city: string
+}
+
+const isBatchEditModalOpen = ref(false)
+const isSavingBatchMetadata = ref(false)
+const batchTargetPhotos = ref<Photo[]>([])
+const batchLocationSelection = ref<{
+  latitude: number
+  longitude: number
+} | null>(null)
+const batchFormState = reactive<BatchMetadataFormState>({
+  updateTags: false,
+  tagMode: 'add',
+  tags: [],
+  updateLocation: false,
+  updateCity: false,
+  city: '',
+})
+const batchTagsModel = computed<string[]>({
+  get: () => batchFormState.tags,
+  set: (value) => {
+    const next = Array.isArray(value) ? normalizeTagList(value) : []
+    if (!areTagListsEqual(batchFormState.tags, next)) batchFormState.tags = next
+  },
+})
+const batchTagModeOptions = computed(() => [
+  { label: $t('dashboard.photos.batchEditModal.tagModes.add'), value: 'add' },
+  {
+    label: $t('dashboard.photos.batchEditModal.tagModes.remove'),
+    value: 'remove',
+  },
+  {
+    label: $t('dashboard.photos.batchEditModal.tagModes.replace'),
+    value: 'replace',
+  },
+])
+const formattedBatchCoordinates = computed(() =>
+  batchLocationSelection.value
+    ? {
+        latitude: batchLocationSelection.value.latitude.toFixed(6),
+        longitude: batchLocationSelection.value.longitude.toFixed(6),
+      }
+    : null,
+)
+const isBatchMetadataDirty = computed(() => {
+  const tagsChanged =
+    batchFormState.updateTags &&
+    (batchFormState.tagMode === 'replace' || batchFormState.tags.length > 0)
+  const locationChanged =
+    batchFormState.updateLocation && !!batchLocationSelection.value
+  return (
+    batchTargetPhotos.value.length > 0 &&
+    (tagsChanged || locationChanged || batchFormState.updateCity)
+  )
+})
+const resetBatchMetadataForm = () => {
+  batchTargetPhotos.value = []
+  batchFormState.updateTags = false
+  batchFormState.tagMode = 'add'
+  batchFormState.tags = []
+  batchFormState.updateLocation = false
+  batchFormState.updateCity = false
+  batchFormState.city = ''
+  batchLocationSelection.value = null
+}
+
 const uploadImage = async (
   file: File,
   existingFileId?: string,
@@ -761,6 +834,10 @@ watch(isEditModalOpen, (open) => {
     locationSelection.value = null
     locationTouched.value = false
   }
+})
+
+watch(isBatchEditModalOpen, (open) => {
+  if (!open) resetBatchMetadataForm()
 })
 
 // 表格多选状态
@@ -2045,6 +2122,88 @@ const handleSingleDeleteRequest = (photo: Photo) => {
   openDeleteConfirm('single', [photo])
 }
 
+const openBatchMetadataEditor = () => {
+  const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
+  const selectedPhotos: Photo[] =
+    selectedRowModel?.rows.map((row: { original: Photo }) => row.original) || []
+  if (selectedPhotos.length === 0) {
+    toast.add({
+      title: $t('dashboard.photos.messages.batchSelectRequired'),
+      description: '',
+      color: 'warning',
+    })
+    return
+  }
+  resetBatchMetadataForm()
+  batchTargetPhotos.value = selectedPhotos
+  isBatchEditModalOpen.value = true
+}
+
+const saveBatchMetadataChanges = async () => {
+  if (!isBatchMetadataDirty.value) return
+  const targetPhotos = [...batchTargetPhotos.value]
+  const payload: {
+    photoIds: string[]
+    tags?: { mode: BatchTagMode; values: string[] }
+    location?: { latitude: number; longitude: number }
+    city?: string | null
+  } = { photoIds: [] }
+  if (batchFormState.updateTags) {
+    payload.tags = {
+      mode: batchFormState.tagMode,
+      values: [...batchFormState.tags],
+    }
+  }
+  if (batchFormState.updateLocation && batchLocationSelection.value) {
+    payload.location = { ...batchLocationSelection.value }
+  }
+  if (batchFormState.updateCity)
+    payload.city = batchFormState.city.trim() || null
+  isSavingBatchMetadata.value = true
+  try {
+    let updatedCount = 0
+    for (let index = 0; index < targetPhotos.length; index += 200) {
+      const batch = targetPhotos.slice(index, index + 200)
+      const result = await $fetch('/api/photos/batch-metadata', {
+        method: 'PUT',
+        body: { ...payload, photoIds: batch.map((photo) => photo.id) },
+      })
+      updatedCount += result.updatedCount
+    }
+    toast.add({
+      title: $t('dashboard.photos.messages.batchMetadataUpdateSuccess', {
+        count: updatedCount,
+      }),
+      description: '',
+      color: 'success',
+    })
+    rowSelection.value = {}
+    await refresh()
+    isBatchEditModalOpen.value = false
+  } catch (error: any) {
+    console.error('批量更新照片信息失败:', error)
+    const message =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      error?.message ||
+      $t('dashboard.photos.messages.batchMetadataUpdateFailed')
+    toast.add({
+      title: $t('dashboard.photos.messages.batchMetadataUpdateFailed'),
+      description: message,
+      color: 'error',
+    })
+  } finally {
+    isSavingBatchMetadata.value = false
+  }
+}
+
+const handleBatchMetadataSubmit = async (
+  event: FormSubmitEvent<BatchMetadataFormState>,
+) => {
+  event.preventDefault()
+  await saveBatchMetadataChanges()
+}
+
 // 批量删除功能
 const handleBatchDelete = () => {
   const selectedRowModel = table.value?.tableApi?.getFilteredSelectedRowModel()
@@ -2890,6 +3049,18 @@ onUnmounted(() => {
 
                 <div class="flex items-center gap-1 sm:gap-1.5 pr-2">
                   <UButton
+                    color="primary"
+                    variant="soft"
+                    size="sm"
+                    class="rounded-full"
+                    icon="tabler:edit"
+                    @click="openBatchMetadataEditor"
+                  >
+                    <span class="hidden sm:inline">{{
+                      $t('dashboard.photos.selection.batchEditMetadata')
+                    }}</span>
+                  </UButton>
+                  <UButton
                     color="neutral"
                     variant="ghost"
                     size="sm"
@@ -3118,6 +3289,178 @@ onUnmounted(() => {
               >
                 {{ $t('dashboard.photos.editModal.actions.save') }}
               </UButton>
+            </div>
+          </template>
+        </USlideover>
+
+        <USlideover
+          v-model:open="isBatchEditModalOpen"
+          :title="$t('dashboard.photos.batchEditModal.title')"
+          :description="
+            $t('dashboard.photos.batchEditModal.description', {
+              count: batchTargetPhotos.length,
+            })
+          "
+          :ui="{
+            content: 'sm:max-w-xl',
+            body: 'p-2',
+            header:
+              'px-6 py-5 border-b border-neutral-200 dark:border-neutral-800',
+            footer:
+              'px-6 py-5 border-t border-neutral-200 dark:border-neutral-800',
+          }"
+        >
+          <template #body>
+            <UForm
+              id="batch-edit-photo-form"
+              :state="batchFormState"
+              class="space-y-5"
+              @submit="handleBatchMetadataSubmit"
+            >
+              <div
+                class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
+              >
+                <UCheckbox
+                  v-model="batchFormState.updateTags"
+                  :label="$t('dashboard.photos.batchEditModal.fields.tags')"
+                />
+                <div
+                  v-if="batchFormState.updateTags"
+                  class="mt-4 space-y-3 pl-6"
+                >
+                  <UFormField
+                    :label="
+                      $t('dashboard.photos.batchEditModal.fields.tagMode')
+                    "
+                    name="tagMode"
+                  >
+                    <USelect
+                      v-model="batchFormState.tagMode"
+                      :items="batchTagModeOptions"
+                      class="w-full"
+                    />
+                  </UFormField>
+                  <UFormField
+                    :label="
+                      $t('dashboard.photos.batchEditModal.fields.tagValues')
+                    "
+                    name="tags"
+                  >
+                    <UInputTags
+                      v-model="batchTagsModel"
+                      class="w-full"
+                    />
+                  </UFormField>
+                  <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                    {{
+                      batchFormState.tagMode === 'replace'
+                        ? $t(
+                            'dashboard.photos.batchEditModal.fields.replaceTagsHint',
+                          )
+                        : $t('dashboard.photos.batchEditModal.fields.tagsHint')
+                    }}
+                  </p>
+                </div>
+              </div>
+              <div
+                class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
+              >
+                <UCheckbox
+                  v-model="batchFormState.updateLocation"
+                  :label="$t('dashboard.photos.batchEditModal.fields.location')"
+                />
+                <div
+                  v-if="batchFormState.updateLocation"
+                  class="mt-4 space-y-3 pl-6"
+                >
+                  <MapLocationPicker
+                    v-model="batchLocationSelection"
+                    class="border border-neutral-200 dark:border-neutral-800"
+                  >
+                    <template #empty>
+                      <span
+                        class="px-3 py-2 rounded-full bg-white/80 text-neutral-600 dark:bg-neutral-900/80 dark:text-neutral-200 shadow"
+                        >{{
+                          $t(
+                            'dashboard.photos.batchEditModal.fields.locationPickerHint',
+                          )
+                        }}</span
+                      >
+                    </template>
+                  </MapLocationPicker>
+                  <div
+                    class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400"
+                  >
+                    <span
+                      >{{
+                        $t(
+                          'dashboard.photos.batchEditModal.fields.coordinates',
+                        )
+                      }}:</span
+                    >
+                    <span v-if="formattedBatchCoordinates"
+                      >{{ formattedBatchCoordinates.latitude }},
+                      {{ formattedBatchCoordinates.longitude }}</span
+                    >
+                    <span v-else>{{
+                      $t('dashboard.photos.batchEditModal.fields.noLocation')
+                    }}</span>
+                  </div>
+                  <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                    {{
+                      $t('dashboard.photos.batchEditModal.fields.locationHint')
+                    }}
+                  </p>
+                </div>
+              </div>
+              <div
+                class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
+              >
+                <UCheckbox
+                  v-model="batchFormState.updateCity"
+                  :label="$t('dashboard.photos.batchEditModal.fields.city')"
+                />
+                <div
+                  v-if="batchFormState.updateCity"
+                  class="mt-4 space-y-2 pl-6"
+                >
+                  <UInput
+                    v-model="batchFormState.city"
+                    :placeholder="
+                      $t(
+                        'dashboard.photos.batchEditModal.fields.cityPlaceholder',
+                      )
+                    "
+                    class="w-full"
+                  />
+                  <p class="text-xs text-neutral-500 dark:text-neutral-400">
+                    {{ $t('dashboard.photos.batchEditModal.fields.cityHint') }}
+                  </p>
+                </div>
+              </div>
+            </UForm>
+          </template>
+          <template #footer>
+            <div class="flex items-center justify-end gap-2 w-full">
+              <UButton
+                variant="ghost"
+                color="neutral"
+                :disabled="isSavingBatchMetadata"
+                @click.prevent="isBatchEditModalOpen = false"
+                >{{
+                  $t('dashboard.photos.batchEditModal.actions.cancel')
+                }}</UButton
+              >
+              <UButton
+                type="submit"
+                form="batch-edit-photo-form"
+                :loading="isSavingBatchMetadata"
+                :disabled="!isBatchMetadataDirty || isSavingBatchMetadata"
+                icon="tabler:device-floppy"
+                >{{
+                  $t('dashboard.photos.batchEditModal.actions.apply')
+                }}</UButton
+              >
             </div>
           </template>
         </USlideover>

@@ -115,6 +115,7 @@ export const imageUploadIntents = sqliteTable(
     eraseLocation: integer('erase_location', { mode: 'boolean' })
       .notNull()
       .default(false),
+    exif: text('exif', { mode: 'json' }).$type<NeededExif>(),
     status: text('status', {
       enum: ['pending', 'uploading', 'uploaded', 'finalized', 'failed'],
     })
