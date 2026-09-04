@@ -77,7 +77,11 @@ pnpm docs:build
 ```
 
 Use `pnpm d1:generate` for schema changes and review the generated SQL before
-applying it. `pnpm run deploy` builds the Worker, applies remote D1 migrations, and
-deploys through Wrangler. Do not restore Docker build or image-publishing
+applying it. Cloud deployments use Cloudflare Workers Builds connected to GitHub:
+`pnpm run build:cloudflare` validates and builds, then `pnpm run deploy:cloudflare`
+applies remote D1 migrations and deploys the existing artifact. Keep production
+builds restricted to `main`; build variables and runtime secrets are separate.
+`pnpm run deploy` remains the full manual local build-and-deploy command.
+Do not add a GitHub Actions deployment workflow. Do not restore Docker build or image-publishing
 workflows; the old container implementation is available from historical Git
 tags for migration reference.

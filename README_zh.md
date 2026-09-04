@@ -59,9 +59,19 @@
 
 ## ☁️ 部署到 Cloudflare Workers
 
+云端自动部署使用 **Cloudflare Workers Builds 的 GitHub 集成**。在现有 `chronoframe` Worker 的 **Settings > Builds** 连接 `Pitrick3141/chronoframe`，生产分支为 `main`，根目录为 `/`：
+
+- Build command：`pnpm run build:cloudflare`
+- Deploy command：`pnpm run deploy:cloudflare`
+- 构建变量：`PNPM_VERSION=10.34.1`；Node 22 由 `.node-version` 指定。
+
+关闭非生产分支构建，并为 Cloudflare 构建使用的部署令牌启用 D1 Edit。运行时密钥继续保存在 Worker 的 Variables & Secrets。完整配置见 [GitHub 集成部署](./docs/zh/guide/getting-started.md#cloudflare-github-integration)。
+
 ChronoFrame 现在仅支持 Cloudflare Workers 运行环境。当前压缩 bundle 超过 Workers Free 的 3 MB 脚本上限，因此需要 Workers Paid 计划；还需启用 Cloudflare Images 付费存储计划与 Cloudflare Stream。Hosted Images 单图上限为 10 MiB；支持 JPEG、PNG、GIF、WebP、SVG 与 HEIC，AVIF 输入仅限 Enterprise。公开 Worker 路由通过 Images binding 返回最长边不超过 4096 px、已剥离元数据的 WebP 展示图，并生成 600 px WebP 缩略图；Hosted Image 原始源文件仅管理员可访问，应用不使用账户级交付变体。Stream 按[视频存储分钟和传输分钟](https://developers.cloudflare.com/stream/pricing/)计费。
 
 视频上传时，Worker 使用 `STREAM` binding 创建一次性的 Direct Creator Upload URL，浏览器将 multipart POST 直接发送到 Stream，处理完成后通过 HLS 播放。Cloudflare binding 的 basic POST 流程要求文件小于 200 MB；ChronoFrame 因此默认限制为 `199999999` 字节。默认最大时长为 600 秒，应用和浏览器都不需要接触 Stream API Token。
+
+首次资源初始化或本地手动部署可使用：
 
 ```bash
 pnpm install
@@ -71,7 +81,7 @@ pnpm exec wrangler login
 pnpm d1:create
 
 # 创建 wrangler.jsonc 中声明的 R2 存储桶。
-pnpm exec wrangler r2 bucket create chronoframe-media
+pnpm exec wrangler r2 bucket create chronoframe-storage
 
 # 在 Cloudflare 控制台启用 Stream；STREAM 使用 binding，无需应用 token。
 
@@ -268,10 +278,10 @@ pnpm run deploy
 
 ## ⭐️ Star History
 
-<a href="https://www.star-history.com/#HoshinoSuzumi/chronoframe&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#HoshinoSuzumi/chronoframe&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
  </picture>
 </a>

@@ -1,4 +1,5 @@
 import type { SettingConfig } from '~~/shared/types/settings'
+import { localeLanguages } from '~~/i18n/i18n.options'
 
 // 存储提供商的枚举值
 export const STORAGE_PROVIDERS = ['local', 's3', 'openlist'] as const
@@ -189,7 +190,7 @@ export const DEFAULT_SETTINGS = [
     key: 'language',
     type: 'string',
     defaultValue: 'en',
-    enum: ['en', 'zh-CN', 'zh-TW', 'ja'] as const,
+    enum: localeLanguages,
     label: 'settings.location.language.label',
     description: 'settings.location.language.description',
     isPublic: true,

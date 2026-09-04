@@ -2,7 +2,13 @@
 
 ChronoFrame builds the release first, then applies pending database migrations immediately before deploying code that depends on them. Keep a recent D1 export and inventories/backups for Hosted Images, Stream videos, and R2 objects before significant upgrades.
 
-## Standard update
+## Automatic updates through Cloudflare GitHub integration
+
+Commit and push reviewed changes to `main` in the connected repository. Cloudflare Workers Builds runs `pnpm run build:cloudflare`, then `pnpm run deploy:cloudflare` to apply remote D1 migrations and publish the Worker. View logs and retry builds from the Cloudflare dashboard's Builds page.
+
+See [GitHub integration setup](/guide/getting-started#cloudflare-github-integration) for the initial connection and permissions.
+
+## Manual local update
 
 ```bash
 git pull --ff-only
@@ -18,10 +24,6 @@ Review the migration SQL and release notes before deploying. `pnpm run deploy` b
 Deploying an earlier Worker version does not reverse a D1 migration. Prefer backward-compatible migrations and a staged release. If a schema rollback is unavoidable, restore or transform D1 deliberately rather than deleting migration records.
 
 Images, Stream videos, and R2 object mutations are also independent of Worker code deployment. Keep a migration manifest for bulk changes so every service can be reconciled. A code rollback does not undo Stream uploads or delivered-minute usage.
-
-## GitHub Actions
-
-The Cloudflare Workers workflow performs the same production sequence in its protected `production` environment: install, validate/build, substitute the configured D1 database ID, apply remote migrations, and deploy. See [Deploy to Cloudflare Workers](/guide/getting-started#github-actions-deployment) for required secrets and variables.
 
 ## From the legacy Docker line
 

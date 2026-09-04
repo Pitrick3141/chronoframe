@@ -59,9 +59,19 @@ A smooth photo display and management application, supporting multiple image for
 
 ## ☁️ Deploy to Cloudflare Workers
 
+Cloud deployments use **Cloudflare Workers Builds with GitHub integration**. Connect `Pitrick3141/chronoframe` from the existing `chronoframe` Worker's **Settings > Builds**, with production branch `main` and root directory `/`:
+
+- Build command: `pnpm run build:cloudflare`
+- Deploy command: `pnpm run deploy:cloudflare`
+- Build variable: `PNPM_VERSION=10.34.1`; `.node-version` selects Node 22.
+
+Disable non-production branch builds and grant the Cloudflare deployment token D1 Edit. Runtime secrets remain in the Worker's Variables & Secrets. See the [GitHub integration setup](./docs/guide/getting-started.md#cloudflare-github-integration).
+
 ChronoFrame is Workers-only. The current bundle requires the Workers Paid plan because it exceeds the Workers Free 3 MB compressed script limit. A Cloudflare account with paid Cloudflare Images storage and Cloudflare Stream enabled is also required. Hosted Images accepts files up to 10 MiB; supported inputs are JPEG, PNG, GIF, WebP, SVG, and HEIC. AVIF input requires Enterprise. The public Worker route returns a metadata-stripped WebP display image capped at 4096 px and generates 600 px WebP thumbnails through the Images binding; the raw Hosted Image source is administrator-only. Account-level delivery variants are not used. Stream is billed by [minutes stored and minutes delivered](https://developers.cloudflare.com/stream/pricing/).
 
 For videos, the Worker uses the `STREAM` binding to create a one-time Direct Creator Upload URL, the browser sends a multipart POST directly to Stream, and playback uses HLS after processing. Cloudflare's binding supports this basic POST flow for files under 200 MB; ChronoFrame therefore defaults to `199999999` bytes. The default maximum duration is 600 seconds. No Stream API token is exposed to the app or browser.
+
+For one-off resource setup or a manual local deployment:
 
 ```bash
 pnpm install
@@ -71,7 +81,7 @@ pnpm exec wrangler login
 pnpm d1:create
 
 # Create the R2 bucket named by wrangler.jsonc.
-pnpm exec wrangler r2 bucket create chronoframe-media
+pnpm exec wrangler r2 bucket create chronoframe-storage
 
 # Enable Cloudflare Stream in the dashboard; STREAM uses a binding, not an app token.
 
@@ -267,10 +277,10 @@ Thanks to the following open-source projects and libraries:
 
 ## ⭐️ Star History
 
-<a href="https://www.star-history.com/#HoshinoSuzumi/chronoframe&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#HoshinoSuzumi/chronoframe&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=HoshinoSuzumi/chronoframe&type=date&legend=top-left" />
  </picture>
 </a>

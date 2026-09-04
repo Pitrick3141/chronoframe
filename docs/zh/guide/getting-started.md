@@ -37,7 +37,7 @@ pnpm d1:create
 创建 `wrangler.jsonc` 中声明的 R2 存储桶：
 
 ```bash
-pnpm exec wrangler r2 bucket create chronoframe-media
+pnpm exec wrangler r2 bucket create chronoframe-storage
 ```
 
 在 Cloudflare 控制台中启用 Images。ChronoFrame 不要求账户级交付变体：`/media/images/:id` 先按 D1 校验可见性，再返回最长边不超过 4096 px、已剥离元数据的 WebP 展示图；`/media/images/:id/thumbnail` 返回 600 px WebP 缩略图。Hosted Image 原始字节只能由管理员通过 `/media/images/:id/source` 获取。
@@ -52,10 +52,10 @@ Worker 使用以下固定绑定名：
 
 | 绑定           | Cloudflare 资源                 | 用途                                      |
 | -------------- | ------------------------------- | ----------------------------------------- |
-| `DB`           | D1 数据库 `chronoframe`         | 用户、设置、照片元数据、相册与任务状态    |
+| `DB`           | D1 数据库 `chronoframe-db`         | 用户、设置、照片元数据、相册与任务状态    |
 | `IMAGES`       | Cloudflare Images Hosted Images | 所有上传图片                              |
 | `STREAM`       | Cloudflare Stream               | 所有视频，包括 Live/Motion Photo 视频伴侣 |
-| `MEDIA_BUCKET` | R2 存储桶 `chronoframe-media`   | 其他非图片、非视频对象                    |
+| `MEDIA_BUCKET` | R2 存储桶 `chronoframe-storage`   | 其他非图片、非视频对象                    |
 | `ASSETS`       | `.output/public`                | Nuxt 客户端资源                           |
 
 不要在 Nuxt 设置中填写存储访问密钥；Worker 通过绑定访问这些资源。
@@ -91,13 +91,15 @@ bootstrap token 用于为首次初始化请求鉴权；它不是管理员密码�
 
 ## 5. 应用 D1 migrations 并部署
 
+云端自动部署请配置下文的 [Cloudflare GitHub 集成](#cloudflare-github-integration)。以下命令用于本地手动部署。
+
 部署命令会先完成构建，再应用已追踪但尚未执行的 D1 migrations，随后立即部署匹配的 Worker 产物：
 
 ```bash
 pnpm run deploy
 ```
 
-`pnpm run deploy` 会构建工作区依赖和 Nuxt Worker bundle，再调用 Wrangler。部署完成后会输出 `workers.dev` 地址；可在 **Workers & Pages > chronoframe > Settings > Domains & Routes** 绑定自定义域名。
+`pnpm run deploy` 会构建工作区依赖和 Nuxt Worker bundle，再调用 Wrangler。当前配置部署到 `photograph.pitrick.dev` 并关闭 `workers.dev`；可在 **Workers & Pages > chronoframe > Settings > Domains & Routes** 管理域名，并同步维护 `wrangler.jsonc`。
 
 ### 注册 Stream webhook
 
@@ -138,21 +140,38 @@ pnpm dev:worker
 
 新增 migration 后再次运行 `pnpm d1:migrate:local`。可用 `pnpm exec wrangler d1 execute DB --local --command "SELECT 1"` 快速检查绑定。
 
-## GitHub Actions 部署
+## Cloudflare GitHub 集成 {#cloudflare-github-integration}
 
-Workers workflow 会先向本地 D1 应用 migrations、构建 Pull Request，并执行 Wrangler dry-run 以捕获 binding 或 bundle 体积错误；push 到 `main` 或从 `main` 手动触发时，production job 还会应用远端 D1 migrations 并部署。请在受保护的 `production` environment 中配置：
+云端部署由 **Cloudflare Workers Builds** 直接连接 GitHub 执行，仓库不再包含 GitHub Actions 部署工作流。
 
-| 名称                        | 类型                            | 内容                                                                                                                                           |
-| --------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`      | Secret                          | 具备 Account Settings read、Workers Scripts edit、D1 edit、R2 edit 与 Images edit 权限；仅当还用它创建 webhook 订阅时才需增加 Stream Edit 权限 |
-| `CLOUDFLARE_ACCOUNT_ID`     | Secret                          | 目标 Cloudflare Account ID                                                                                                                     |
-| `CLOUDFLARE_D1_DATABASE_ID` | Repository/environment variable | `wrangler d1 create` 返回的 UUID                                                                                                               |
+当前站点进入 **Workers & Pages > chronoframe > Settings > Builds > Connect**，授权 Cloudflare GitHub App 访问 `Pitrick3141/chronoframe` 并选择该仓库。连接名称与 `wrangler.jsonc` 一致的现有 Worker。
 
-由 CI 接管生产部署前，请先完成上面的首次人工部署与 Stream webhook 注册。此时 `NUXT_SESSION_PASSWORD`、`CFRAME_BOOTSTRAP_TOKEN` 与 `CFRAME_STREAM_WEBHOOK_SECRET` 必须都已存在为 Worker secrets。它们是运行时 secret，不是 GitHub Actions 变量；`keep_vars` 会防止部署覆盖由控制台管理的值。
+| 设置 | 值 |
+| --- | --- |
+| 生产分支 | `main` |
+| 根目录 | `/`（仓库根目录） |
+| Build command | `pnpm run build:cloudflare` |
+| Deploy command | `pnpm run deploy:cloudflare` |
+| 非生产分支构建 | 关闭 |
+| 将来启用非生产分支时的部署命令 | `pnpm exec wrangler deploy --dry-run --config wrangler.jsonc`（仅验证） |
+| 构建变量 | `PNPM_VERSION=10.34.1` |
+| Node.js | 由 `.node-version` 选择 Node 22 |
 
-不需要 `STREAM_API_TOKEN` secret。Wrangler 部署 Worker 时会附加 `STREAM` capability binding；浏览器只会收到一次性的 Direct Creator Upload URL。
+Workers Builds 根据已提交的 pnpm 锁文件安装依赖。`build:cloudflare` 依次生成 binding 类型、检查本地 D1 迁移、lint、构建工作区依赖、类型检查、构建 Nuxt，最后执行 Wrangler dry-run；这一步不修改生产数据库。
 
-如需人工批准数据库迁移和发布，可为 `production` environment 添加 required reviewers。
+`deploy:cloudflare` 检查构建产物，再应用尚未执行的**远端 D1 迁移**并发布已构建的 Worker。云端 Deploy command 不要填写本地完整命令 `pnpm run deploy`，否则会重复构建。部署脚本会在执行远端迁移之前拒绝 Workers Builds 的非 `main` 分支。
+
+上述脚本中的 Wrangler 命令显式选择根目录 `wrangler.jsonc`，确保 Nuxt 生成构建重定向配置后，D1 迁移目录和生产兼容参数仍以仓库配置为准。
+
+在 **Settings > Builds > API token** 选择部署令牌。除 Worker 部署权限外，确认令牌具有 **D1 Edit**；Cloudflare 文档列出的自动生成 build token 默认权限不包含 D1。自定义域名还需要保留 Workers Routes 权限。部署令牌和 GitHub App 授权由 Cloudflare 管理，无需配置 GitHub Actions secrets。
+
+资源 ID、绑定名和 `photograph.pitrick.dev` 由 `wrangler.jsonc` 管理。部署到新账号时，应先修改该文件中的资源配置；不再通过 CI 替换 `CLOUDFLARE_D1_DATABASE_ID`。
+
+运行时密钥继续放在 **Settings > Variables & Secrets**：`NUXT_SESSION_PASSWORD`、`CFRAME_BOOTSTRAP_TOKEN`、`CFRAME_STREAM_WEBHOOK_SECRET`。构建变量与运行时变量是不同范围，不能互相代替。连接当前站点时保留已有密钥和 Stream webhook；`STREAM` capability binding 不需要应用级 `STREAM_API_TOKEN`。
+
+首次集成构建前，将新脚本和工作流删除一起提交并推送到 `main`。之后每次推送会触发 Cloudflare 构建，日志和重试入口都在 Worker 的 Builds 页面。新安装仍需完成上文的资源、密钥和 Stream webhook 配置。
+
+参考：[Workers Builds 配置](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)、[构建环境与工具版本](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)、[GitHub App 连接](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/)。
 
 ## 从旧 Docker 版本迁移
 

@@ -37,7 +37,7 @@ pnpm d1:create
 Create the R2 bucket declared by `wrangler.jsonc`:
 
 ```bash
-pnpm exec wrangler r2 bucket create chronoframe-media
+pnpm exec wrangler r2 bucket create chronoframe-storage
 ```
 
 Enable Cloudflare Images in the Cloudflare dashboard. No account-level delivery variant is required: `/media/images/:id` enforces D1 visibility and returns a metadata-stripped WebP display image capped at 4096 px, while `/media/images/:id/thumbnail` returns a 600 px WebP thumbnail. Raw Hosted Image bytes are available only to administrators through `/media/images/:id/source`.
@@ -52,10 +52,10 @@ The Worker expects these exact binding names:
 
 | Binding        | Cloudflare resource             | Purpose                                                 |
 | -------------- | ------------------------------- | ------------------------------------------------------- |
-| `DB`           | D1 database `chronoframe`       | Users, settings, photo metadata, albums, and task state |
+| `DB`           | D1 database `chronoframe-db`       | Users, settings, photo metadata, albums, and task state |
 | `IMAGES`       | Cloudflare Images Hosted Images | Every uploaded image                                    |
 | `STREAM`       | Cloudflare Stream               | Every video, including Live/Motion Photo companions     |
-| `MEDIA_BUCKET` | R2 bucket `chronoframe-media`   | Other non-image, non-video objects                      |
+| `MEDIA_BUCKET` | R2 bucket `chronoframe-storage`   | Other non-image, non-video objects                      |
 | `ASSETS`       | `.output/public`                | Nuxt client assets                                      |
 
 Do not add storage access keys to Nuxt settings. These resources are available to the Worker through bindings.
@@ -92,13 +92,15 @@ Enter this token on the onboarding completion page. The browser sends it in the 
 
 ## 5. Apply D1 migrations and deploy
 
+For cloud deployments, configure [Cloudflare GitHub integration](#cloudflare-github-integration) below. The following command is for a manual local deployment.
+
 The deploy command builds first, then applies tracked D1 migrations immediately before deploying the matching Worker artifact:
 
 ```bash
 pnpm run deploy
 ```
 
-`pnpm run deploy` builds the workspace dependency and Nuxt Worker bundle before invoking Wrangler. The deployment prints a `workers.dev` URL. A custom domain can be attached from **Workers & Pages > chronoframe > Settings > Domains & Routes**.
+`pnpm run deploy` builds the workspace dependency and Nuxt Worker bundle before invoking Wrangler. The checked-in configuration deploys to `photograph.pitrick.dev` and disables `workers.dev`. Manage the domain under **Workers & Pages > chronoframe > Settings > Domains & Routes** and keep `wrangler.jsonc` aligned.
 
 ### Register the Stream webhook
 
@@ -139,21 +141,38 @@ Local D1 and R2 state is kept in Wrangler's local state directory. The Hosted Im
 
 When a migration is added, re-run `pnpm d1:migrate:local`. Use `pnpm exec wrangler d1 execute DB --local --command "SELECT 1"` for a quick binding check.
 
-## GitHub Actions deployment
+## Cloudflare GitHub integration {#cloudflare-github-integration}
 
-The Workers workflow applies migrations to a local D1, builds pull requests, and runs a Wrangler dry-run to catch binding or bundle-size failures. Its production job also applies remote D1 migrations and deploys from `main` on a push or manual dispatch. Configure the protected `production` environment with:
+Cloud deployments use **Cloudflare Workers Builds**, connected directly to GitHub. The repository has no GitHub Actions deployment workflow.
 
-| Name                        | Kind                            | Value                                                                                                                                                                             |
-| --------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`      | Secret                          | Token with Account Settings read plus Workers Scripts edit, D1 edit, R2 edit, and Images edit; add Stream Edit only if this token is also used to create the webhook subscription |
-| `CLOUDFLARE_ACCOUNT_ID`     | Secret                          | Target Cloudflare account ID                                                                                                                                                      |
-| `CLOUDFLARE_D1_DATABASE_ID` | Repository/environment variable | UUID returned by `wrangler d1 create`                                                                                                                                             |
+For this existing installation, open **Workers & Pages > chronoframe > Settings > Builds > Connect**, authorize the Cloudflare GitHub App for `Pitrick3141/chronoframe`, and select that repository. Connect the existing Worker whose name matches `wrangler.jsonc` rather than creating another Worker.
 
-Before CI takes over production deployment, complete the manual first deployment and Stream webhook registration above. At that point `NUXT_SESSION_PASSWORD`, `CFRAME_BOOTSTRAP_TOKEN`, and `CFRAME_STREAM_WEBHOOK_SECRET` must all exist as Worker secrets. They are runtime secrets, not GitHub Actions values; `keep_vars` prevents deployment from replacing dashboard-managed values.
+| Setting | Value |
+| --- | --- |
+| Production branch | `main` |
+| Root directory | `/` (repository root) |
+| Build command | `pnpm run build:cloudflare` |
+| Deploy command | `pnpm run deploy:cloudflare` |
+| Non-production branch builds | Disabled |
+| Non-production deploy command, if enabled later | `pnpm exec wrangler deploy --dry-run --config wrangler.jsonc` (validation only) |
+| Build variable | `PNPM_VERSION=10.34.1` |
+| Node.js | `.node-version` selects Node 22 |
 
-No `STREAM_API_TOKEN` secret is required. Wrangler attaches `STREAM` as a capability binding when it deploys the Worker; the browser only receives a one-time Direct Creator Upload URL.
+Workers Builds installs dependencies from the checked-in pnpm lockfile. `build:cloudflare` generates binding types, checks local D1 migrations, lints, builds the workspace dependency, type-checks, builds Nuxt, and runs Wrangler dry-run. It does not mutate the production database.
 
-Add required reviewers to the `production` environment if database migrations and deployments should require approval.
+`deploy:cloudflare` verifies the build artifacts, applies pending **remote D1 migrations**, then publishes the already-built Worker. Do not use the full local `pnpm run deploy` as the cloud deploy command, because it would build a second time. The deployment guard rejects Workers Builds branches other than `main` before any remote migration runs.
+
+All Wrangler commands used by these scripts explicitly select the root `wrangler.jsonc`. This keeps the D1 migration directory and production compatibility flags correct even when Nuxt generates a redirected build configuration.
+
+Choose the deployment API token in **Settings > Builds > API token**. Ensure it has **D1 Edit** in addition to Worker deployment permissions; Cloudflare's automatically generated build token does not include D1 in its documented default permissions. Retain the Workers Routes permission for the configured custom domain. The deployment token and GitHub App authorization are managed in Cloudflare, not GitHub Actions secrets.
+
+Resource IDs, binding names, and `photograph.pitrick.dev` are defined in `wrangler.jsonc`. For a new account, edit that file to reference its resources before connecting Git. There is no CI substitution of `CLOUDFLARE_D1_DATABASE_ID`.
+
+Runtime secrets remain under **Settings > Variables & Secrets**: `NUXT_SESSION_PASSWORD`, `CFRAME_BOOTSTRAP_TOKEN`, and `CFRAME_STREAM_WEBHOOK_SECRET`. Build variables are a separate scope and do not become runtime secrets. Preserve the existing values and Stream webhook subscription when connecting this installation. The `STREAM` capability binding requires no application-level `STREAM_API_TOKEN`.
+
+Commit and push the deployment scripts and workflow removal to `main` before the first integrated build. Subsequent pushes trigger Cloudflare builds; logs and retries are available in the Worker's Builds page. For a new installation, complete resource/secret setup and Stream webhook registration described above.
+
+References: [Workers Builds configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/), [build image and tool versions](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/), [GitHub App connection](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/).
 
 ## Migrating from legacy Docker releases
 
