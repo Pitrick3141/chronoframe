@@ -53,6 +53,8 @@ export class WebGLImageViewerEngine {
   private worker: Worker | null = null
   private imageLoadingResolve: (() => void) | null = null
   private imageLoadingReject: ((error: Error) => void) | null = null
+  private imageLoadId = 0
+  private preserveViewOnImageLoad = false
 
   // 变换状态
   private transform: Transform = { scale: 1, translateX: 0, translateY: 0 }
@@ -237,42 +239,73 @@ export class WebGLImageViewerEngine {
   }
 
   private async handleWorkerImageLoaded(payload: any) {
-    const { imageBitmap } = payload
+    const { imageBitmap, requestId } = payload
+    if (requestId !== this.imageLoadId || !this.imageLoadingResolve) {
+      imageBitmap?.close()
+      return
+    }
 
     try {
-      const rendered = this.applyDecodedImage(imageBitmap)
+      const rendered = this.applyDecodedImage(
+        imageBitmap,
+        this.preserveViewOnImageLoad,
+      )
       if (!rendered) {
         await this.renderWithMainThreadFallback(
           new Error('Failed to render worker ImageBitmap'),
+          requestId,
         )
       }
 
-      this.resolvePendingImageLoad()
+      this.resolvePendingImageLoad(requestId)
     } catch (err) {
       console.error('Failed to render worker image:', err)
-      this.rejectPendingImageLoad(err)
+      this.rejectPendingImageLoad(err, requestId)
     }
   }
 
-  private async handleWorkerImageLoadError(error: any) {
+  private async handleWorkerImageLoadError(payload: any) {
+    const requestId = payload.requestId ?? this.imageLoadId
+    if (requestId !== this.imageLoadId || !this.imageLoadingResolve) return
+    const error = payload.error ?? payload
     console.error('Image load error from worker:', error)
 
     try {
-      await this.renderWithMainThreadFallback(error)
-      this.resolvePendingImageLoad()
+      await this.renderWithMainThreadFallback(error, requestId)
+      this.resolvePendingImageLoad(requestId)
     } catch (fallbackError) {
-      this.rejectPendingImageLoad(fallbackError)
+      this.rejectPendingImageLoad(fallbackError, requestId)
     }
   }
 
   private applyDecodedImage(
     imageSource: HTMLCanvasElement | HTMLImageElement | ImageBitmap,
+    preserveView = false,
   ): boolean {
     const originalDimensions = this.getSourceDimensions(imageSource)
     if (!originalDimensions) {
       return false
     }
 
+    // Capture at decode completion so interactions made while downloading survive.
+    const previousImage = this.image
+    const previousInitialScale = this.initialScale
+    const previousAnimation = this.animation
+    const previousView =
+      preserveView &&
+      previousImage &&
+      this.initialScale > 0 &&
+      this.transform.scale > 0
+        ? {
+            relativeScale: this.transform.scale / this.initialScale,
+            centerX:
+              (this.canvas.width / 2 - this.transform.translateX) /
+              (previousImage.width * this.transform.scale),
+            centerY:
+              (this.canvas.height / 2 - this.transform.translateY) /
+              (previousImage.height * this.transform.scale),
+          }
+        : null
     this.image = imageSource
 
     const shouldUseTiles = this.shouldUseTiles(imageSource)
@@ -287,6 +320,7 @@ export class WebGLImageViewerEngine {
       this.emitLoadingStateChange(true, LoadingState.TEXTURE_LOADING)
       const texture = this.createTexture(imageSource)
       if (!texture) {
+        this.image = previousImage
         return false
       }
     } else {
@@ -295,8 +329,67 @@ export class WebGLImageViewerEngine {
 
     this.useTiles = usingTiles
 
-    if (this.config.centerOnInit) {
+    // Old animation coordinates refer to the previous source's pixels.
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId)
+      this.animationId = null
+    }
+    this.animation = null
+
+    if (previousView && this.image) {
+      this.initialScale = this.getFitScale()
+      const scale = this.clampScale(
+        this.initialScale * previousView.relativeScale,
+      )
+      this.transform = {
+        scale,
+        translateX:
+          this.canvas.width / 2 -
+          previousView.centerX * this.image.width * scale,
+        translateY:
+          this.canvas.height / 2 -
+          previousView.centerY * this.image.height * scale,
+      }
+      this.constrainToBounds()
+      if (previousAnimation && previousImage) {
+        const remapTransform = (transform: Transform): Transform => {
+          const nextScale = this.clampScale(
+            (this.initialScale * transform.scale) / previousInitialScale,
+          )
+          return {
+            scale: nextScale,
+            translateX:
+              this.canvas.width / 2 -
+              ((this.canvas.width / 2 - transform.translateX) /
+                (previousImage.width * transform.scale)) *
+                this.image!.width *
+                nextScale,
+            translateY:
+              this.canvas.height / 2 -
+              ((this.canvas.height / 2 - transform.translateY) /
+                (previousImage.height * transform.scale)) *
+                this.image!.height *
+                nextScale,
+          }
+        }
+        this.animation = {
+          ...previousAnimation,
+          startTransform: remapTransform(previousAnimation.startTransform),
+          targetTransform: remapTransform(previousAnimation.targetTransform),
+        }
+      }
+      this.emitZoomChange()
+      this.emitTransformChange()
+    } else if (this.config.centerOnInit) {
       this.centerImage()
+    }
+
+    if (
+      previousImage &&
+      previousImage !== this.image &&
+      'close' in previousImage
+    ) {
+      previousImage.close()
     }
 
     const finalWidth = this.image?.width ?? originalDimensions.width
@@ -313,13 +406,19 @@ export class WebGLImageViewerEngine {
       this.currentQuality = 'high'
     }
 
-    this.emitLoadingStateChange(false, LoadingState.COMPLETE, this.currentQuality)
+    this.emitLoadingStateChange(
+      false,
+      LoadingState.COMPLETE,
+      this.currentQuality,
+    )
     this.render()
 
     return true
   }
 
-  private async decodeImageOnMainThread(src: string): Promise<HTMLImageElement> {
+  private async decodeImageOnMainThread(
+    src: string,
+  ): Promise<HTMLImageElement> {
     return await new Promise((resolve, reject) => {
       const image = new Image()
       image.crossOrigin = 'anonymous'
@@ -332,7 +431,11 @@ export class WebGLImageViewerEngine {
     })
   }
 
-  private async renderWithMainThreadFallback(reason: unknown): Promise<void> {
+  private async renderWithMainThreadFallback(
+    reason: unknown,
+    requestId: number,
+  ): Promise<void> {
+    if (requestId !== this.imageLoadId) return
     const src = this.lastRequestedSrc
     if (!src) {
       if (reason instanceof Error) {
@@ -345,21 +448,24 @@ export class WebGLImageViewerEngine {
     this.emitLoadingStateChange(true, LoadingState.IMAGE_LOADING)
 
     const image = await this.decodeImageOnMainThread(src)
-    const rendered = this.applyDecodedImage(image)
+    if (requestId !== this.imageLoadId || !this.imageLoadingResolve) return
+    const rendered = this.applyDecodedImage(image, this.preserveViewOnImageLoad)
 
     if (!rendered) {
       throw new Error('Main-thread decode succeeded but rendering still failed')
     }
   }
 
-  private resolvePendingImageLoad(): void {
+  private resolvePendingImageLoad(requestId: number): void {
+    if (requestId !== this.imageLoadId) return
     const resolve = this.imageLoadingResolve
     this.imageLoadingResolve = null
     this.imageLoadingReject = null
     resolve?.()
   }
 
-  private rejectPendingImageLoad(error: unknown): void {
+  private rejectPendingImageLoad(error: unknown, requestId: number): void {
+    if (requestId !== this.imageLoadId) return
     const reject = this.imageLoadingReject
     this.imageLoadingResolve = null
     this.imageLoadingReject = null
@@ -367,10 +473,23 @@ export class WebGLImageViewerEngine {
     const normalizedError =
       error instanceof Error
         ? error
-        : new Error(typeof error === 'string' ? error : 'Unknown image load error')
+        : new Error(
+            typeof error === 'string' ? error : 'Unknown image load error',
+          )
 
     this.emitLoadingStateChange(false, LoadingState.ERROR)
     reject?.(normalizedError)
+  }
+
+  private cancelPendingImageLoad(): void {
+    const reject = this.imageLoadingReject
+    this.imageLoadingResolve = null
+    this.imageLoadingReject = null
+    if (reject) {
+      const error = new Error('Image load superseded or viewer destroyed')
+      error.name = 'AbortError'
+      reject(error)
+    }
   }
 
   private createBuffers(): void {
@@ -472,8 +591,10 @@ export class WebGLImageViewerEngine {
     this.onLoadingStateChange?.(isLoading, state, quality)
   }
 
-  public async loadImage(src: string): Promise<void> {
-    console.log('Post load image:', src)
+  public async loadImage(src: string, preserveView = false): Promise<void> {
+    this.cancelPendingImageLoad()
+    const requestId = ++this.imageLoadId
+    this.preserveViewOnImageLoad = preserveView
     this.lastRequestedSrc = src
     this.emitLoadingStateChange(true, LoadingState.IMAGE_LOADING)
 
@@ -488,18 +609,26 @@ export class WebGLImageViewerEngine {
           )
           this.worker.postMessage({
             type: 'load',
-            payload: { src: absolute.toString() },
+            payload: { src: absolute.toString(), requestId },
           })
         } catch (error) {
-          console.warn('Worker postMessage failed, using main-thread fallback.', error)
-          void this.renderWithMainThreadFallback(error)
-            .then(() => this.resolvePendingImageLoad())
-            .catch((fallbackError) => this.rejectPendingImageLoad(fallbackError))
+          console.warn(
+            'Worker postMessage failed, using main-thread fallback.',
+            error,
+          )
+          void this.renderWithMainThreadFallback(error, requestId)
+            .then(() => this.resolvePendingImageLoad(requestId))
+            .catch((fallbackError) =>
+              this.rejectPendingImageLoad(fallbackError, requestId),
+            )
         }
       } else {
-        void this.renderWithMainThreadFallback(new Error('No worker available'))
-          .then(() => this.resolvePendingImageLoad())
-          .catch((error) => this.rejectPendingImageLoad(error))
+        void this.renderWithMainThreadFallback(
+          new Error('No worker available'),
+          requestId,
+        )
+          .then(() => this.resolvePendingImageLoad(requestId))
+          .catch((error) => this.rejectPendingImageLoad(error, requestId))
       }
     })
   }
@@ -1544,7 +1673,9 @@ export class WebGLImageViewerEngine {
           if (!recreated) {
             const texture = this.createTexture(this.image)
             if (!texture) {
-              throw new Error('Failed to recreate texture after context restore')
+              throw new Error(
+                'Failed to recreate texture after context restore',
+              )
             }
             usingTiles = false
           }
@@ -1804,6 +1935,8 @@ export class WebGLImageViewerEngine {
   }
 
   public destroy(): void {
+    ++this.imageLoadId
+    this.cancelPendingImageLoad()
     // 清理动画
     if (this.animationId) {
       cancelAnimationFrame(this.animationId)

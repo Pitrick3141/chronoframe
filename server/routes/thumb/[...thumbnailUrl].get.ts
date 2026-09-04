@@ -1,3 +1,5 @@
+import { getImageVariant } from '../../../shared/utils/image-variants'
+
 function safeThumbnailTarget(candidate: string, requestUrl: URL): URL | null {
   let target: URL
   try {
@@ -14,9 +16,20 @@ function safeThumbnailTarget(candidate: string, requestUrl: URL): URL | null {
     target.port === '' &&
     /^\/[^/]+\/[^/]+\/[^/]+$/.test(target.pathname)
 
+  const localQueriesAllowed =
+    [...target.searchParams.keys()].every(
+      (key) => key === 'v' || key === 'w',
+    ) &&
+    target.searchParams.getAll('v').length <= 1 &&
+    target.searchParams.getAll('w').length <= 1 &&
+    (target.searchParams.get('v')?.length ?? 0) <= 128 &&
+    getImageVariant(
+      target.pathname.endsWith('/thumbnail') ? 'thumbnail' : 'display',
+      target.searchParams.get('w') ?? undefined,
+    ) !== null
   const isLocalHostedImage =
     target.origin === requestUrl.origin &&
-    target.search === '' &&
+    localQueriesAllowed &&
     /^\/media\/images\/[^/]+(?:\/thumbnail)?$/.test(target.pathname)
 
   return isCloudflareDelivery || isLocalHostedImage ? target : null
@@ -25,14 +38,20 @@ function safeThumbnailTarget(candidate: string, requestUrl: URL): URL | null {
 export default eventHandler((event) => {
   const rawUrl = getRouterParam(event, 'thumbnailUrl')
   if (!rawUrl) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid thumbnail URL' })
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid thumbnail URL',
+    })
   }
 
   let decodedUrl: string
   try {
     decodedUrl = decodeURIComponent(rawUrl)
   } catch {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid thumbnail URL' })
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid thumbnail URL',
+    })
   }
 
   const target = safeThumbnailTarget(decodedUrl, getRequestURL(event))

@@ -108,6 +108,8 @@ export async function requireReadableHostedImage(
       storageKey: tables.photos.storageKey,
       sourceFilename: tables.photos.sourceFilename,
       sourceMimeType: tables.photos.sourceMimeType,
+      width: tables.photos.width,
+      height: tables.photos.height,
     })
     .from(tables.photos)
     .where(

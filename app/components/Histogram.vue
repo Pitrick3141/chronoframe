@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { twMerge } from 'tailwind-merge'
+import { imageVariantUrl } from '~/utils/image-variants'
 import {
   calculateHistogramCompressed,
   drawHistogramToCanvas,
@@ -25,72 +26,83 @@ const cleanup = () => {
   if (currentImage) {
     currentImage.onload = null
     currentImage.onerror = null
-    currentImage.src = '' // 取消缩略图加载
+    currentImage.removeAttribute('src')
     currentImage = null
   }
 }
 
-watchEffect(() => {
-  isLoading.value = true
-  isError.value = false
-  histogramData.value = null
+watch(
+  () => props.thumbnailUrl,
+  (thumbnailUrl) => {
+    isLoading.value = true
+    isError.value = false
+    histogramData.value = null
 
-  // 如果有正在加载的缩略图，打断
-  cleanup()
+    // 如果有正在加载的缩略图，打断
+    cleanup()
 
-  const img = new Image()
-  currentImage = img
-  img.crossOrigin = 'anonymous'
-
-  const url = new URL(props.thumbnailUrl, window.location.origin)
-  url.searchParams.set('_cors', Date.now().toString())
-  img.src = url.toString()
-
-  img.onload = () => {
-    // 检查这是否还是当前的缩略图
-    if (img !== currentImage) {
-      return
-    }
-
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
+    if (!thumbnailUrl) {
       isError.value = true
       isLoading.value = false
       return
     }
 
-    const scale = 360 / Math.max(img.width, img.height)
-    const [w, h] = [
-      Math.floor(img.width * scale),
-      Math.floor(img.height * scale),
-    ]
-    canvas.width = w
-    canvas.height = h
-    ctx.drawImage(img, 0, 0, w, h)
+    const img = new Image()
+    currentImage = img
+    const src = imageVariantUrl(thumbnailUrl, 360)
+    const url = new URL(src, window.location.origin)
+    if (url.origin !== window.location.origin) img.crossOrigin = 'anonymous'
 
-    try {
-      const imageData = ctx.getImageData(0, 0, w, h)
-      histogramData.value = calculateHistogramCompressed(imageData)
-    } catch (e) {
+    img.onload = () => {
+      // 检查这是否还是当前的缩略图
+      if (img !== currentImage) {
+        return
+      }
+
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        isError.value = true
+        isLoading.value = false
+        currentImage = null
+        return
+      }
+
+      const scale = 360 / Math.max(img.width, img.height)
+      const [w, h] = [
+        Math.floor(img.width * scale),
+        Math.floor(img.height * scale),
+      ]
+      canvas.width = w
+      canvas.height = h
+      ctx.drawImage(img, 0, 0, w, h)
+
+      try {
+        const imageData = ctx.getImageData(0, 0, w, h)
+        histogramData.value = calculateHistogramCompressed(imageData)
+      } catch (e) {
+        isError.value = true
+        console.error('Failed to calculate histogram', e)
+      } finally {
+        isLoading.value = false
+        currentImage = null
+      }
+    }
+
+    img.onerror = () => {
+      // 检查这是否还是当前的缩略图
+      if (img !== currentImage) {
+        return
+      }
       isError.value = true
-      console.error('Failed to calculate histogram', e)
-    } finally {
       isLoading.value = false
       currentImage = null
     }
-  }
-
-  img.onerror = () => {
-    // 检查这是否还是当前的缩略图
-    if (img !== currentImage) {
-      return
-    }
-    isError.value = true
-    isLoading.value = false
-    currentImage = null
-  }
-})
+    // Handlers must be attached before a cached image can complete.
+    img.src = src
+  },
+  { immediate: true },
+)
 
 watchEffect(() => {
   if (histogramData.value && canvasRef.value) {
@@ -115,7 +127,9 @@ onUnmounted(cleanup)
           name="tabler:loader"
           class="text-xl animate-spin"
         />
-        <span class="text-xs font-medium">{{ $t('ui.histogram.rendering') }}</span>
+        <span class="text-xs font-medium">{{
+          $t('ui.histogram.rendering')
+        }}</span>
       </div>
     </Transition>
     <Transition name="fade">
@@ -127,7 +141,9 @@ onUnmounted(cleanup)
           name="tabler:alert-triangle"
           class="text-xl"
         />
-        <span class="text-xs font-medium">{{ $t('ui.histogram.loadError') }}</span>
+        <span class="text-xs font-medium">{{
+          $t('ui.histogram.loadError')
+        }}</span>
       </div>
     </Transition>
     <Transition name="fade">

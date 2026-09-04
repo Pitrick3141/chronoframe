@@ -14,6 +14,9 @@ const props = withDefaults(
     rootMargin?: string
     imageContain?: boolean
     lazy?: boolean
+    srcset?: string
+    sizes?: string
+    fetchpriority?: 'high' | 'low' | 'auto'
   }>(),
   {
     thumbhash: null,
@@ -24,6 +27,9 @@ const props = withDefaults(
     rootMargin: '50px',
     imageContain: false,
     lazy: true,
+    srcset: undefined,
+    sizes: undefined,
+    fetchpriority: 'auto',
   },
 )
 
@@ -33,21 +39,29 @@ const emit = defineEmits<{
 }>()
 
 const elemRef = useTemplateRef('elemRef')
-const isElemVisible = ref(false)
+const imageRef = useTemplateRef<HTMLImageElement>('imageRef')
+const isElemVisible = ref(!props.lazy)
 const isLoaded = ref(false)
 const isError = ref(false)
+const imageKey = computed(() => `${props.src}\0${props.srcset || ''}`)
 
-onMounted(() => {
-  if (!props.lazy) {
-    isElemVisible.value = true
-  }
+watch(imageKey, () => {
+  isLoaded.value = false
+  isError.value = false
 })
+
+watch(
+  () => props.lazy,
+  (lazy) => {
+    if (!lazy) isElemVisible.value = true
+  },
+)
 
 const { stop } = useIntersectionObserver(
   elemRef,
   ([entry], _observerElement) => {
-    isElemVisible.value = entry?.isIntersecting || false
-    if (isElemVisible.value) {
+    if (entry?.isIntersecting) {
+      isElemVisible.value = true
       stop()
     }
   },
@@ -58,12 +72,15 @@ const { stop } = useIntersectionObserver(
   },
 )
 
-const onLoaded = () => {
+const onLoaded = (event: Event) => {
+  if (event.currentTarget !== imageRef.value) return
   isLoaded.value = true
+  isError.value = false
   emit('load')
 }
 
-const onError = () => {
+const onError = (event: Event) => {
+  if (event.currentTarget !== imageRef.value) return
   isError.value = true
   emit('error')
 }
@@ -82,9 +99,15 @@ const onError = () => {
     />
 
     <img
-      v-if="isElemVisible"
-      loading="lazy"
+      v-if="isElemVisible && src"
+      :key="imageKey"
+      ref="imageRef"
+      :loading="lazy ? 'lazy' : 'eager'"
+      decoding="async"
       :src="src"
+      :srcset="srcset"
+      :sizes="sizes"
+      :fetchpriority="fetchpriority"
       :alt="alt"
       :class="
         twMerge(

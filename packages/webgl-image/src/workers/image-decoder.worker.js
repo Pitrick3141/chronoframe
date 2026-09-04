@@ -35,6 +35,7 @@ self.onmessage = async (event) => {
         {
           type: 'loaded',
           payload: {
+            requestId: payload.requestId,
             imageBitmap,
             width: imageBitmap.width,
             height: imageBitmap.height,
@@ -45,7 +46,10 @@ self.onmessage = async (event) => {
     } catch (error) {
       self.postMessage({
         type: 'load-error',
-        payload: error instanceof Error ? error : 'Unknown error',
+        payload: {
+          requestId: payload.requestId,
+          error: error instanceof Error ? error : 'Unknown error',
+        },
       })
     }
   }

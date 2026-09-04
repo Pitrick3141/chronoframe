@@ -1,5 +1,8 @@
 import type { LoadingIndicatorRef } from '~/components/photo/LoadingIndicator.vue'
-import { ImageLoaderManager } from '~/libs/image-loader-manager'
+import {
+  ImageLoaderManager,
+  isImageLoadAbortError,
+} from '~/libs/image-loader-manager'
 
 export const useImageLoader = (
   src: string,
@@ -43,10 +46,12 @@ export const useImageLoader = (
         },
       })
 
+      if (!loaderManager.isActive) return
       updateBlobSrc?.(loadResult.blobSrc)
       updateHighResLoaded?.(true)
       onImageLoaded?.() // 通知图片加载完成
-    } catch {
+    } catch (error) {
+      if (!loaderManager.isActive || isImageLoadAbortError(error)) return
       updateError?.(true)
       loadingIndicatorRef?.updateLoadingState({
         isVisible: true,

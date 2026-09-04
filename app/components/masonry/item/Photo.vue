@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatCameraInfo } from '~/utils/camera'
+import { thumbnailSrcSet } from '~/utils/image-variants'
 import { motion, useDomRef } from 'motion-v'
 
 interface Props {
@@ -17,11 +18,19 @@ const emit = defineEmits<{
 
 const { gtag } = useGtag()
 
-const isLoading = ref(true)
+const isImageLoaded = ref(false)
 const photoRef = ref<HTMLElement>()
 const videoRef = useDomRef()
 const isVisible = ref(false)
 const containerWidth = ref(0)
+const thumbnailSources = computed(() =>
+  thumbnailSrcSet(props.photo.thumbnailUrl || ''),
+)
+const thumbnailSizes = computed(() =>
+  containerWidth.value > 0
+    ? `${Math.ceil(containerWidth.value)}px`
+    : '(max-width: 768px) calc((100vw - 12px) / 2), 280px',
+)
 
 const isHovering = ref(false)
 const isVideoPlaying = ref(false)
@@ -95,11 +104,12 @@ const shouldShowInfoOverlay = computed(() => {
 
 // Methods
 const handleImageLoad = () => {
-  isLoading.value = false
+  isImageLoaded.value = true
+  void processLivePhotoWhenVisible()
 }
 
 const handleImageError = () => {
-  isLoading.value = false
+  isImageLoaded.value = false
   console.warn(`Failed to load image: ${props.photo.thumbnailUrl}`)
 }
 
@@ -117,7 +127,7 @@ const handleMouseEnter = async () => {
     playLivePhotoVideo()
   } else if (!processingState.value?.isProcessing) {
     // 如果视频还未处理，立即开始处理
-    processLivePhotoWhenVisible()
+    void processLivePhotoWhenVisible(true)
   }
 }
 
@@ -230,7 +240,7 @@ const handleTouchStart = (event: TouchEvent) => {
     !isStreamVideoLoading.value &&
     !processingState.value?.isProcessing
   ) {
-    void processLivePhotoWhenVisible()
+    void processLivePhotoWhenVisible(true)
   }
 
   touchCount.value = event.touches.length
@@ -340,12 +350,14 @@ const handleClick = (event: Event) => {
 }
 
 // 智能LivePhoto处理：基于可见性和用户行为
-const processLivePhotoWhenVisible = async () => {
+const processLivePhotoWhenVisible = async (userInteraction = false) => {
   const requestedStreamUrl = props.photo.livePhotoVideoUrl
   if (
     !props.photo.isLivePhoto ||
     !requestedStreamUrl ||
     !isVisible.value ||
+    (!isImageLoaded.value && !userInteraction) ||
+    isVideoLoaded.value ||
     isStreamVideoLoading.value ||
     processingState.value?.isProcessing
   )
@@ -363,6 +375,7 @@ const processLivePhotoWhenVisible = async () => {
     if (
       streamUrl &&
       attachmentId === streamAttachmentId &&
+      isVisible.value &&
       streamUrl === props.photo.livePhotoVideoUrl &&
       videoRef.value
     ) {
@@ -431,6 +444,13 @@ const formatExposureTime = (
 }
 
 watch(
+  () => props.photo.thumbnailUrl,
+  () => {
+    isImageLoaded.value = false
+  },
+)
+
+watch(
   () => props.photo.livePhotoVideoUrl,
   () => {
     streamAttachmentId++
@@ -438,11 +458,11 @@ watch(
     isVideoLoaded.value = false
     isVideoPlaying.value = false
     detachStreamVideo()
-    if (isVisible.value) void nextTick(processLivePhotoWhenVisible)
+    if (isVisible.value) void nextTick(() => processLivePhotoWhenVisible())
   },
 )
 
-// Preload image on mount to get dimensions
+// Dimensions come from metadata; only the rendered ThumbImage requests pixels.
 onMounted(() => {
   // Get container width
   nextTick(() => {
@@ -459,23 +479,6 @@ onMounted(() => {
       resizeObserverRef.value = resizeObserver
     }
   })
-
-  // Preload thumbnail image
-  if (props.photo.thumbnailUrl) {
-    const img = new Image()
-    img.onload = () => {
-      // Update loading state after preload completes
-      isLoading.value = false
-    }
-    img.onerror = () => {
-      // Even if preload fails, we should stop loading state
-      isLoading.value = false
-    }
-    img.src = props.photo.thumbnailUrl
-  } else {
-    // If no thumbnail URL, stop loading immediately
-    isLoading.value = false
-  }
 
   // Set up intersection observer for visibility tracking
   nextTick(() => {
@@ -495,7 +498,7 @@ onMounted(() => {
               // Process LivePhoto when it becomes visible
               if (newVisibility) {
                 nextTick(() => {
-                  processLivePhotoWhenVisible()
+                  void processLivePhotoWhenVisible()
                 })
               } else {
                 // Do not keep an hls.js MediaSource, network loader, and media
@@ -511,7 +514,7 @@ onMounted(() => {
         },
         {
           threshold: 0.1, // Trigger when 10% of the item is visible
-          rootMargin: '50px 0px 50px 0px', // Add some margin for smoother transitions
+          rootMargin: '0px', // Video preparation is limited to the actual viewport.
         },
       )
 
@@ -573,6 +576,11 @@ onUnmounted(() => {
       >
         <ThumbImage
           :src="photo.thumbnailUrl || ''"
+          :srcset="thumbnailSources"
+          :sizes="thumbnailSizes"
+          :lazy="index >= 8"
+          :fetchpriority="index < 2 ? 'high' : 'auto'"
+          root-margin="800px 0px"
           :alt="photo.title || $t('ui.photo.altFallback')"
           :thumbhash="photo.thumbnailHash || ''"
           class="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"

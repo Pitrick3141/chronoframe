@@ -50,6 +50,16 @@ export function imageSourcePath(photoId: string): string {
   return `${imageDisplayPath(photoId)}/source`
 }
 
+function imagePathsForClient(photo: PublicPhotoInput) {
+  const revision = photo.lastModified
+    ? `?${new URLSearchParams({ v: photo.lastModified })}`
+    : ''
+  return {
+    originalUrl: `${imageDisplayPath(photo.id)}${revision}`,
+    thumbnailUrl: `${imageThumbnailPath(photo.id)}${revision}`,
+  }
+}
+
 function basename(value: string | null | undefined): string | null {
   const normalized = value?.replaceAll('\\', '/').trim()
   if (!normalized) return null
@@ -92,8 +102,7 @@ function publicPhotoForClient(photo: PublicPhotoInput) {
     dateTaken: photo.dateTaken ?? null,
     fileSize: photo.fileSize ?? null,
     lastModified: photo.lastModified ?? null,
-    originalUrl: imageDisplayPath(photo.id),
-    thumbnailUrl: imageThumbnailPath(photo.id),
+    ...imagePathsForClient(photo),
     thumbnailHash: photo.thumbnailHash ?? null,
     tags: photo.tags ?? [],
     exif: photo.exif ?? {},
@@ -118,8 +127,7 @@ function publicPhotoForClient(photo: PublicPhotoInput) {
 function adminPhotoForClient<T extends PublicPhotoInput>(photo: T) {
   return {
     ...photo,
-    originalUrl: imageDisplayPath(photo.id),
-    thumbnailUrl: imageThumbnailPath(photo.id),
+    ...imagePathsForClient(photo),
     displayFilename:
       basename(photo.sourceFilename) ||
       basename(photo.title) ||

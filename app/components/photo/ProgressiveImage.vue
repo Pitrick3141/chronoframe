@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { WebGLImageViewer } from '@chronoframe/webgl-image'
+import { LoadingState, WebGLImageViewer } from '@chronoframe/webgl-image'
 import type { LoadingIndicatorRef } from './LoadingIndicator.vue'
-import type { ImageLoaderManager } from '~/libs/image-loader-manager'
+import { ImageLoaderManager } from '~/libs/image-loader-manager'
+import { imageVariantUrl, selectDisplaySize } from '~/utils/image-variants'
 
 interface Props {
   src: string
@@ -65,7 +66,24 @@ const showDebugInfo = computed(() => {
 
 // 使用 WebGLImageViewer 的引用
 const webglViewerRef = ref()
-const loaderManagerRef = ref<ImageLoaderManager | null>(null)
+let activeLoader: ImageLoaderManager | null = null
+let pendingLoader: ImageLoaderManager | null = null
+let retiredLoaders: ImageLoaderManager[] = []
+let requestId = 0
+let requestedSize = 0
+let requestedUrl = ''
+let renderedSize = 0
+let renderedImage: {
+  loader: ImageLoaderManager
+  src: string
+  size: number
+} | null = null
+let mounted = false
+const relativeZoom = ref(1)
+// The viewer fills the viewport. Swiper's mounting/transition layout briefly
+// reports smaller element sizes, which would start and then cancel a low-res
+// request on every open. Use stable viewport dimensions for the first request.
+const { width: viewportWidth, height: viewportHeight } = useWindowSize()
 
 const showThumbnail = computed(() => {
   return props.thumbnailSrc && (!highResRendered.value || hasError.value)
@@ -80,85 +98,165 @@ const showWebGLViewer = computed(() => {
   )
 })
 
-const loadImage = () => {
-  loaderManagerRef.value = useImageLoader(
-    props.src,
-    props.isCurrentImage,
-    highResLoaded.value,
-    hasError.value,
-    props.loadingIndicatorRef,
-    props.onProgress,
-    props.onError,
-    (src) => (currentSrc.value = src),
-    (loaded) => (highResLoaded.value = loaded),
-    (error) => (hasError.value = error),
-    (rendered) => (highResRendered.value = rendered),
-    props.onImageLoaded,
-  )
+const releaseRetiredLoaders = () => {
+  retiredLoaders.forEach((loader) => loader.cleanup())
+  retiredLoaders = []
 }
 
-// 监听 isCurrentImage 的变化，当变为 true 时触发图片加载
-watch(
-  () => props.isCurrentImage,
-  (isCurrent, wasCurrent) => {
-    if (!isCurrent && wasCurrent) {
-      // 当图片不再是当前图片时，中断加载
-      loaderManagerRef.value?.cleanup()
-      loaderManagerRef.value = null
-    } else if (
-      isCurrent &&
-      !wasCurrent &&
-      !highResLoaded.value &&
-      !hasError.value
-    ) {
-      // 当图片变为当前图片且尚未加载高分辨率图片时，触发加载
-      loadImage()
+const resetImage = () => {
+  requestId++
+  currentSrc.value = null
+  highResLoaded.value = false
+  highResRendered.value = false
+  hasError.value = false
+  relativeZoom.value = 1
+  requestedSize = renderedSize = 0
+  requestedUrl = ''
+  renderedImage = null
+  pendingLoader?.cleanup()
+  activeLoader?.cleanup()
+  pendingLoader = activeLoader = null
+  releaseRetiredLoaders()
+  props.onBlobSrcChange?.(null)
+}
+
+const loadFittedImage = async () => {
+  if (!mounted || !props.isCurrentImage || !props.src) return
+  const size = selectDisplaySize(
+    props.width,
+    props.height,
+    viewportWidth.value || window.innerWidth,
+    viewportHeight.value || window.innerHeight,
+    window.devicePixelRatio,
+    relativeZoom.value,
+  )
+  const url = imageVariantUrl(props.src, size)
+  if (size <= requestedSize || url === requestedUrl) return
+
+  const id = ++requestId
+  pendingLoader?.cleanup()
+  const loader = new ImageLoaderManager()
+  pendingLoader = loader
+  requestedSize = size
+  requestedUrl = url
+  const hasPreview = Boolean(currentSrc.value)
+  try {
+    const result = await loader.loadImage(url, {
+      onProgress: (progress) => {
+        if (id === requestId && !hasPreview) props.onProgress?.(progress)
+      },
+      onUpdateLoadingState: (state) => {
+        if (id === requestId && !hasPreview)
+          props.loadingIndicatorRef?.updateLoadingState(state)
+      },
+    })
+    if (id !== requestId || !props.isCurrentImage) return
+    // Keep the old Blob alive until the renderer has decoded its replacement.
+    if (activeLoader) retiredLoaders.push(activeLoader)
+    activeLoader = loader
+    pendingLoader = null
+    renderedSize = size
+    currentSrc.value = result.blobSrc
+    highResLoaded.value = true
+    hasError.value = false
+    props.onBlobSrcChange?.(result.blobSrc)
+  } catch (error) {
+    loader.cleanup()
+    if (id !== requestId) return
+    pendingLoader = null
+    requestedSize = renderedSize
+    requestedUrl = ''
+    if (error instanceof Error && error.name === 'AbortError') {
+      // Session changes can invalidate a shared request without changing this
+      // photo. Retry under the new session; our own cancellations change id.
+      await nextTick()
+      if (id === requestId) void loadFittedImage()
+      return
     }
+    // An interrupted/failed upgrade leaves the already rendered image usable.
+    if (!currentSrc.value) {
+      hasError.value = true
+      props.onError?.()
+      props.loadingIndicatorRef?.updateLoadingState({ isVisible: false })
+    }
+  }
+}
+
+watch(
+  [() => props.src, () => props.isCurrentImage],
+  () => {
+    resetImage()
+    void loadFittedImage()
   },
-  { immediate: false },
+  { flush: 'post' },
 )
 
-// 监听 src 的变化，当源地址改变时重置状态并重新加载
-watch(
-  () => props.src,
-  (newSrc, oldSrc) => {
-    if (newSrc !== oldSrc) {
-      // 中断之前的加载
-      loaderManagerRef.value?.cleanup()
-      loaderManagerRef.value = null
+watch([viewportWidth, viewportHeight], () => void loadFittedImage())
 
-      // 重置状态
-      highResLoaded.value = false
-      highResRendered.value = false
-      hasError.value = false
-      currentSrc.value = null
+onMounted(() => {
+  mounted = true
+  void loadFittedImage()
+})
 
-      // 如果是当前图片，立即开始加载
-      if (props.isCurrentImage) {
-        loadImage()
+const updateWebGLState = useWebGLWorkState(props.loadingIndicatorRef)
+const handleWebGLStateChange = (
+  isLoading: boolean,
+  state?: LoadingState,
+  quality?: 'high' | 'medium' | 'low' | 'unknown',
+) => {
+  if (!props.isCurrentImage) return
+  if (!highResRendered.value || !isLoading)
+    updateWebGLState(isLoading, state, quality)
+  if (!isLoading && state === LoadingState.COMPLETE) {
+    highResRendered.value = true
+    if (activeLoader && currentSrc.value) {
+      renderedImage = {
+        loader: activeLoader,
+        src: currentSrc.value,
+        size: renderedSize,
       }
     }
-  },
-  { immediate: false },
-)
-
-// 初始加载
-loadImage()
-
-const handleWebGLStateChange = useWebGLWorkState(props.loadingIndicatorRef)
+    releaseRetiredLoaders()
+    props.onImageLoaded?.()
+  } else if (state === LoadingState.ERROR) {
+    if (renderedImage && renderedImage.src !== currentSrc.value) {
+      // A GPU/decode failure must not throw away an already usable preview.
+      requestId++
+      pendingLoader?.cleanup()
+      pendingLoader = null
+      activeLoader?.cleanup()
+      activeLoader = renderedImage.loader
+      retiredLoaders = retiredLoaders.filter(
+        (loader) => loader !== activeLoader,
+      )
+      releaseRetiredLoaders()
+      currentSrc.value = renderedImage.src
+      requestedSize = renderedSize = renderedImage.size
+      requestedUrl = ''
+      props.onBlobSrcChange?.(renderedImage.src)
+      return
+    }
+    hasError.value = true
+    releaseRetiredLoaders()
+    props.onError?.()
+  }
+}
 
 // 处理缩放状态变化
-const handleZoomChange = (originalScale: number, relativeScale: number) => {
+const handleZoomChange = (_originalScale: number, relativeScale: number) => {
+  relativeZoom.value = relativeScale
+  if (relativeScale > 1.1) void loadFittedImage()
   const isZoomed = relativeScale > 1.1 // 认为缩放超过 1.1 倍算作缩放状态
   if (props.onZoomChange) {
-    props.onZoomChange(isZoomed, Math.round(originalScale * 10) / 10) // 传递绝对倍率并保留一位小数
+    // A fitted image is 1x regardless of the currently decoded resolution.
+    props.onZoomChange(isZoomed, Math.round(relativeScale * 10) / 10)
   }
 }
 
 // 组件卸载时清理
 onUnmounted(() => {
-  loaderManagerRef.value?.cleanup()
-  loaderManagerRef.value = null
+  mounted = false
+  resetImage()
 })
 </script>
 
@@ -167,21 +265,14 @@ onUnmounted(() => {
     ref="containerRef"
     class="relative w-full h-full flex items-center justify-center"
   >
-    <!-- 缩略图 (加载时显示) -->
-    <!-- <img
-      v-if="showThumbnail"
-      :src="thumbnailSrc"
-      :alt="alt"
-      class="absolute inset-0 w-full h-full object-contain"
-    /> -->
-    <!-- use <ThumbImage /> instead -->
     <ThumbImage
       v-if="showThumbnail"
-      :src="thumbnailSrc"
+      :src="imageVariantUrl(thumbnailSrc, 360)"
       :thumbhash="thumbhash"
       :alt="alt || $t('ui.photo.altFallback')"
       class="absolute inset-0 w-full h-full object-contain"
       thumbhash-class="opacity-50"
+      :lazy="false"
       image-contain
     />
 
@@ -190,6 +281,7 @@ onUnmounted(() => {
       v-if="showWebGLViewer"
       ref="webglViewerRef"
       :src="currentSrc!"
+      preserve-view-on-source-change
       :class="className"
       class="w-full h-full"
       :width="width"

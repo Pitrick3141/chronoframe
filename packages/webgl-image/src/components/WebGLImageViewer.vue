@@ -20,6 +20,7 @@ const props = withDefaults(defineProps<WebGLImageViewerProps>(), {
   minScale: 0.1,
   maxScale: 10,
   centerOnInit: true,
+  preserveViewOnSourceChange: false,
   debug: false,
   limitToBounds: true,
   smooth: true,
@@ -140,6 +141,7 @@ const initEngine = async (): Promise<void> => {
       }
     }
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') return
     console.error('Failed to initialize WebGL engine:', err)
     error.value = err instanceof Error ? err.message : 'Unknown error'
     throw err
@@ -204,12 +206,13 @@ watch(
   async (newSrc) => {
     if (newSrc && engine.value) {
       try {
-        await engine.value.loadImage(newSrc)
+        await engine.value.loadImage(newSrc, props.preserveViewOnSourceChange)
 
         if (config.value.debug) {
           updateDebugInfo()
         }
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return
         console.error('Failed to load new image:', err)
         error.value =
           err instanceof Error ? err.message : 'Failed to load image'

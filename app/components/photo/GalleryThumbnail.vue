@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { motion } from 'motion-v'
+import { imageVariantUrl } from '~/utils/image-variants'
 
 interface Props {
   photos: Photo[]
@@ -15,6 +16,9 @@ const emit = defineEmits<{
 // DOM 引用
 const galleryScrollContainer = ref<HTMLDivElement>()
 const containerClientWidth = ref(0)
+const containerScrollLeft = ref(0)
+let sizeObserver: ResizeObserver | null = null
+let mountedContainer: HTMLDivElement | null = null
 
 // 响应式断点
 const isMobile = useMediaQuery('(max-width: 768px)')
@@ -39,6 +43,31 @@ const currentPaddingSize = computed(() =>
   isMobile.value ? THUMBNAIL_CONFIG.padding.sm : THUMBNAIL_CONFIG.padding.lg,
 )
 
+const visibleRange = computed(() => {
+  const stride = currentThumbnailSize.value + currentGapSize.value
+  return {
+    start: Math.max(
+      0,
+      Math.floor(
+        (containerScrollLeft.value - currentPaddingSize.value) / stride,
+      ) - 2,
+    ),
+    end:
+      Math.ceil(
+        (containerScrollLeft.value +
+          containerClientWidth.value -
+          currentPaddingSize.value) /
+          stride,
+      ) + 1,
+  }
+})
+
+const shouldLoadThumbnail = (index: number) =>
+  index === props.currentIndex ||
+  (containerClientWidth.value > 0 &&
+    index >= visibleRange.value.start &&
+    index <= visibleRange.value.end)
+
 // 处理缩略图列表
 const thumbnailList = computed(() => {
   return props.photos.map((photo, index) => ({
@@ -59,28 +88,33 @@ const onThumbnailClick = (index: number) => {
 const updateContainerSize = () => {
   if (galleryScrollContainer.value) {
     containerClientWidth.value = galleryScrollContainer.value.clientWidth
+    containerScrollLeft.value = galleryScrollContainer.value.scrollLeft
   }
 }
 
-// 滚动到指定的缩略图位置
-const scrollToActiveThumbnail = async () => {
-  if (!galleryScrollContainer.value) return
+const onScroll = () => {
+  if (galleryScrollContainer.value)
+    containerScrollLeft.value = galleryScrollContainer.value.scrollLeft
+}
 
-  await nextTick()
+// 滚动到指定的缩略图位置
+const scrollToActiveThumbnail = () => {
+  if (!galleryScrollContainer.value) return
 
   const containerWidth = containerClientWidth.value
   const thumbnailSize = currentThumbnailSize.value
   const gapSize = currentGapSize.value
 
   const thumbnailLeftPosition =
-    props.currentIndex * thumbnailSize + gapSize * props.currentIndex
+    currentPaddingSize.value + props.currentIndex * (thumbnailSize + gapSize)
   const targetScrollLeft =
     thumbnailLeftPosition - containerWidth / 2 + thumbnailSize / 2
 
   galleryScrollContainer.value.scrollTo({
-    left: targetScrollLeft,
-    behavior: 'smooth',
+    left: Math.max(0, targetScrollLeft),
+    behavior: 'auto',
   })
+  onScroll()
 }
 
 // 处理滚轮横向滚动
@@ -101,28 +135,30 @@ const onScrollWheel = (event: WheelEvent) => {
 
 onMounted(() => {
   updateContainerSize()
+  scrollToActiveThumbnail()
 
   // 观察容器尺寸变化
   if (galleryScrollContainer.value) {
-    const sizeObserver = new ResizeObserver(updateContainerSize)
-    sizeObserver.observe(galleryScrollContainer.value)
+    mountedContainer = galleryScrollContainer.value
+    sizeObserver = new ResizeObserver(() => {
+      updateContainerSize()
+      scrollToActiveThumbnail()
+    })
+    sizeObserver.observe(mountedContainer)
 
     // 绑定滚轮事件
-    galleryScrollContainer.value.addEventListener('wheel', onScrollWheel, {
+    mountedContainer.addEventListener('wheel', onScrollWheel, {
       passive: false,
     })
-
-    onUnmounted(() => {
-      sizeObserver.disconnect()
-      if (galleryScrollContainer.value) {
-        galleryScrollContainer.value.removeEventListener('wheel', onScrollWheel)
-      }
-    })
+    mountedContainer.addEventListener('scroll', onScroll, { passive: true })
   }
+})
 
-  setTimeout(() => {
-    scrollToActiveThumbnail()
-  }, 500)
+onUnmounted(() => {
+  sizeObserver?.disconnect()
+  mountedContainer?.removeEventListener('wheel', onScrollWheel)
+  mountedContainer?.removeEventListener('scroll', onScroll)
+  mountedContainer = null
 })
 
 watch(
@@ -132,10 +168,15 @@ watch(
     // 这里不需要再次 emit，因为索引变化是由外部传入的
     // 只需要确保滚动位置正确即可
   },
-  { immediate: true },
+  { flush: 'post' },
 )
 
-watch(isMobile, scrollToActiveThumbnail)
+watch(isMobile, () =>
+  nextTick(() => {
+    updateContainerSize()
+    scrollToActiveThumbnail()
+  }),
+)
 </script>
 
 <template>
@@ -176,11 +217,12 @@ watch(isMobile, scrollToActiveThumbnail)
           class="absolute inset-0 w-full h-full"
         />
         <img
-          v-if="photo.thumbnailUrl"
-          :src="photo.thumbnailUrl"
+          v-if="photo.thumbnailUrl && shouldLoadThumbnail(photo.index)"
+          :src="imageVariantUrl(photo.thumbnailUrl, 360)"
           :alt="photo.title || $t('ui.photo.altFallback')"
           class="absolute inset-0 w-full h-full object-cover"
-          loading="lazy"
+          loading="eager"
+          decoding="async"
         />
         <div
           v-else-if="!photo.thumbnailHash"

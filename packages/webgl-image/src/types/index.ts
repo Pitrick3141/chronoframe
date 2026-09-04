@@ -15,6 +15,8 @@ export interface WebGLImageViewerProps {
   maxScale?: number
   /** Center on init */
   centerOnInit?: boolean
+  /** Keep zoom and pan when replacing this photo with a different resolution. */
+  preserveViewOnSourceChange?: boolean
   /** Debug mode */
   debug?: boolean
   /** Limit to bounds */
