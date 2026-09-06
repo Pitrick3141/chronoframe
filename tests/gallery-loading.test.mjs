@@ -214,10 +214,31 @@ async function flushPhotoWork() {
   for (let index = 0; index < 5; index++) await vue.nextTick()
 }
 
-async function mountLivePhoto(prepareResult) {
+async function mountLivePhoto(prepareResult, blur = null) {
   const calls = { prepared: 0, attached: 0, detached: 0, imagePreloads: 0 }
   const observers = []
   const exports = {}
+  const blurExports = {}
+  const revealed = vue.ref({})
+  vm.runInNewContext(
+    ts.transpileModule(
+      readFileSync(
+        new URL('../app/composables/usePhotoBlur.ts', import.meta.url),
+        'utf8',
+      ),
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+        },
+      },
+    ).outputText,
+    {
+      exports: blurExports,
+      useState: () => revealed,
+      useI18n: () => ({ t: (key) => key }),
+    },
+  )
   vm.runInNewContext(photoCompiled, {
     exports,
     require: (id) => {
@@ -231,6 +252,7 @@ async function mountLivePhoto(prepareResult) {
     setTimeout,
     clearTimeout,
     useGtag: () => ({ gtag: () => {} }),
+    usePhotoBlur: blurExports.usePhotoBlur,
     useMediaQuery: () => vue.ref(false),
     useLivePhotoProcessor: () => ({
       getProcessingState: () => vue.ref(null),
@@ -281,6 +303,7 @@ async function mountLivePhoto(prepareResult) {
   const app = renderer.createApp(exports.default, {
     photo: {
       id: 'live-test',
+      blur,
       thumbnailUrl: '/media/images/live-test/thumbnail',
       isLivePhoto: 1,
       livePhotoVideoUrl: '/media/videos/live-test/manifest/video.m3u8',
@@ -296,6 +319,25 @@ async function mountLivePhoto(prepareResult) {
   })
   return { app, state, calls, observer: observers[0] }
 }
+
+test('blurred Live Photos do not prepare or play on visibility, hover or touch before reveal', async (t) => {
+  const fixture = await mountLivePhoto(undefined, { reason: 'spoiler' })
+  t.after(() => fixture.app.unmount())
+  fixture.observer.callback([{ isIntersecting: true }])
+  fixture.state.handleImageLoad()
+  await fixture.state.handleMouseEnter()
+  fixture.state.handleTouchStart({ touches: [{}] })
+  fixture.state.playLivePhotoVideo()
+  await flushPhotoWork()
+  assert.equal(fixture.state.isBlurred.value, true)
+  assert.equal(fixture.calls.prepared, 0)
+  assert.equal(fixture.calls.attached, 0)
+  assert.equal(fixture.state.isVideoPlaying.value, false)
+  fixture.state.handleClick({})
+  await flushPhotoWork()
+  assert.equal(fixture.state.isBlurred.value, false)
+  assert.equal(fixture.calls.prepared, 1)
+})
 
 test('gallery mounting never preloads pixels and automatic video preparation waits for a visible loaded image', async (t) => {
   const fixture = await mountLivePhoto()

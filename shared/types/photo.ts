@@ -93,6 +93,10 @@ export interface NeededExif {
   MicroVideoPresentationTimestampUs?: string | number | null
 }
 
+export type PhotoBlur =
+  | { reason: 'disturbing' | 'spoiler' }
+  | { reason: 'custom'; message: string }
+
 export interface PhotoInfo {
   title: string
   dateTaken: string

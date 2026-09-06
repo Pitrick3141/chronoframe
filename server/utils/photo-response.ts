@@ -1,3 +1,5 @@
+import type { PhotoBlur } from '../../shared/types/photo'
+
 type StreamPhotoFields = {
   id: string
   isLivePhoto?: boolean | number | null
@@ -11,6 +13,7 @@ type StreamPhotoFields = {
 type PublicPhotoInput = StreamPhotoFields & {
   title?: string | null
   description?: string | null
+  blur?: PhotoBlur | null
   width?: number | null
   height?: number | null
   aspectRatio?: number | null
@@ -96,6 +99,7 @@ function publicPhotoForClient(photo: PublicPhotoInput) {
     id: photo.id,
     title: photo.title ?? null,
     description: photo.description ?? null,
+    blur: photo.blur ?? null,
     width: photo.width ?? null,
     height: photo.height ?? null,
     aspectRatio: photo.aspectRatio ?? null,

@@ -8,6 +8,17 @@ const paramsSchema = z.object({ photoId: z.string().min(1) })
 const bodySchema = z.object({
   title: z.string().trim().max(512).optional(),
   description: z.string().trim().max(2000).optional(),
+  blur: z
+    .discriminatedUnion('reason', [
+      z.object({ reason: z.literal('disturbing') }),
+      z.object({ reason: z.literal('spoiler') }),
+      z.object({
+        reason: z.literal('custom'),
+        message: z.string().trim().min(1).max(200),
+      }),
+    ])
+    .nullable()
+    .optional(),
   tags: z.array(z.string().trim().max(128)).max(64).optional(),
   location: z
     .union([
@@ -83,6 +94,8 @@ export default eventHandler(async (event) => {
     exif.Title = payload.title || null
     exif.XPTitle = payload.title || null
   }
+
+  if (payload.blur !== undefined) updateData.blur = payload.blur
 
   if (payload.description !== undefined) {
     updateData.description = payload.description || null

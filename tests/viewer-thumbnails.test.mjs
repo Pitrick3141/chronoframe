@@ -115,6 +115,21 @@ test('filmstrip requests only the active neighborhood, follows scrolling and kee
   const requests = []
   const exports = {}
   let observer
+  const blurExports = {}
+  const revealed = vue.ref({})
+  vm.runInNewContext(
+    transpile(
+      readFileSync(
+        new URL('../app/composables/usePhotoBlur.ts', import.meta.url),
+        'utf8',
+      ),
+    ),
+    {
+      exports: blurExports,
+      useState: () => revealed,
+      useI18n: () => ({ t: (key) => key }),
+    },
+  )
   vm.runInNewContext(
     compileComponent('../app/components/photo/GalleryThumbnail.vue'),
     {
@@ -135,6 +150,7 @@ test('filmstrip requests only the active neighborhood, follows scrolling and kee
         return require(id)
       },
       useMediaQuery: () => vue.ref(false),
+      usePhotoBlur: blurExports.usePhotoBlur,
       ResizeObserver: class {
         constructor(callback) {
           observer = this
@@ -168,6 +184,25 @@ test('filmstrip requests only the active neighborhood, follows scrolling and kee
   assert.equal(findAll(root, (node) => node.tag === 'button').length, 100)
   assert.ok(requests.length <= 12)
   assert.ok(requests.includes('/media/images/50/thumbnail?v=same&w=360'))
+  props.photos[50].blur = { reason: 'spoiler' }
+  await vue.nextTick()
+  const warningButton = findAll(
+    root,
+    (node) =>
+      node.tag === 'button' &&
+      node.props['aria-label'] === 'photoBlur.reasons.spoiler',
+  )[0]
+  assert.ok(warningButton)
+  assert.equal(
+    findAll(warningButton, (node) => node.tag === 'img')[0].props.style.filter,
+    'blur(10px)',
+  )
+  blurExports.usePhotoBlur().revealPhoto(props.photos[50])
+  await vue.nextTick()
+  assert.equal(
+    findAll(warningButton, (node) => node.tag === 'img')[0].props.style.filter,
+    undefined,
+  )
   assert.ok(
     !requests.some(
       (url) => url.includes('/images/0/') || url.includes('/images/99/'),

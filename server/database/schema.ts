@@ -7,7 +7,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
-import type { NeededExif } from '~~/shared/types/photo'
+import type { NeededExif, PhotoBlur } from '~~/shared/types/photo'
 import type { StorageConfig } from '../../shared/types/storage'
 
 type PipelineQueuePayload =
@@ -49,6 +49,7 @@ export const photos = sqliteTable(
     id: text('id').primaryKey().unique(),
     title: text('title'),
     description: text('description'),
+    blur: text('blur', { mode: 'json' }).$type<PhotoBlur>(),
     width: integer('width'),
     height: integer('height'),
     aspectRatio: real('aspect_ratio'),

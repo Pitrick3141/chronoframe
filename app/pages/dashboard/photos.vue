@@ -6,6 +6,7 @@ import type {
   TableRow,
 } from '@nuxt/ui'
 import type { Photo, PipelineQueueItem } from '~~/server/utils/db'
+import type { PhotoBlur } from '~~/shared/types/photo'
 import type { UploadTransportOptions } from '~/composables/useUpload'
 import { h, resolveComponent } from 'vue'
 import { Icon, UBadge } from '#components'
@@ -84,6 +85,7 @@ const systemUploadEraseLocationDefault = computed(() => {
 const dayjs = useDayjs()
 
 const { photos, status, refresh } = usePhotos()
+const { blurLabel } = usePhotoBlur()
 const { filteredPhotos, selectedCounts, hasActiveFilters } = usePhotoFilters()
 
 const totalSelectedFilters = computed(() => {
@@ -253,6 +255,8 @@ interface EditFormState {
   description: string
   tags: string[]
   rating: number | null
+  blurReason: 'off' | PhotoBlur['reason']
+  blurMessage: string
 }
 
 const editingPhoto = ref<Photo | null>(null)
@@ -264,6 +268,8 @@ const editFormState = reactive<EditFormState>({
   description: '',
   tags: [],
   rating: null,
+  blurReason: 'off',
+  blurMessage: '',
 })
 
 const originalMetadata = ref<{
@@ -272,13 +278,40 @@ const originalMetadata = ref<{
   tags: string[]
   location: { latitude: number; longitude: number } | null
   rating: number | null
+  blur: PhotoBlur | null
 }>({
   title: '',
   description: '',
   tags: [],
   location: null,
   rating: null,
+  blur: null,
 })
+
+const blurOptions = computed(() => [
+  { label: $t('photoBlur.off'), value: 'off' },
+  { label: $t('photoBlur.reasons.disturbing'), value: 'disturbing' },
+  { label: $t('photoBlur.reasons.spoiler'), value: 'spoiler' },
+  { label: $t('photoBlur.custom'), value: 'custom' },
+])
+const normalizedBlur = computed<PhotoBlur | null>(() => {
+  const reason = editFormState.blurReason
+  if (reason === 'off') return null
+  if (reason === 'custom')
+    return { reason, message: editFormState.blurMessage.trim() }
+  return { reason }
+})
+const blurMessageInvalid = computed(
+  () =>
+    editFormState.blurReason === 'custom' &&
+    (!editFormState.blurMessage.trim() ||
+      editFormState.blurMessage.trim().length > 200),
+)
+const blurChanged = computed(
+  () =>
+    JSON.stringify(normalizedBlur.value) !==
+    JSON.stringify(originalMetadata.value.blur),
+)
 
 const locationSelection = ref<{ latitude: number; longitude: number } | null>(
   null,
@@ -360,6 +393,7 @@ const isMetadataDirty = computed(
     descriptionChanged.value ||
     tagsChanged.value ||
     locationChanged.value ||
+    blurChanged.value ||
     ratingChanged.value,
 )
 
@@ -872,12 +906,15 @@ watch(isEditModalOpen, (open) => {
     editFormState.description = ''
     editFormState.tags = []
     editFormState.rating = null
+    editFormState.blurReason = 'off'
+    editFormState.blurMessage = ''
     originalMetadata.value = {
       title: '',
       description: '',
       tags: [],
       location: null,
       rating: null,
+      blur: null,
     }
     locationSelection.value = null
     locationTouched.value = false
@@ -1236,6 +1273,23 @@ const columns = computed<TableColumn<Photo>[]>(() => [
   {
     accessorKey: 'title',
     header: $t('dashboard.photos.table.columns.title'),
+    cell: ({ row }) =>
+      h('div', { class: 'flex items-center gap-2' }, [
+        h('span', row.original.title || ''),
+        row.original.blur
+          ? h(
+              UBadge,
+              {
+                color: 'warning',
+                variant: 'soft',
+                size: 'sm',
+                icon: 'tabler:eye-off',
+                class: 'max-w-48 whitespace-normal break-words',
+              },
+              () => blurLabel(row.original.blur!),
+            )
+          : null,
+      ]),
   },
   {
     accessorKey: 'tags',
@@ -1814,6 +1868,9 @@ const openMetadataEditor = (photo: Photo) => {
   editingPhoto.value = photo
   editFormState.title = initialTitle
   editFormState.description = initialDescription
+  editFormState.blurReason = photo.blur?.reason ?? 'off'
+  editFormState.blurMessage =
+    photo.blur?.reason === 'custom' ? photo.blur.message : ''
   editFormState.tags = [...initialTags]
   editFormState.rating =
     typeof photo.exif?.Rating === 'number' ? photo.exif.Rating : null
@@ -1828,6 +1885,7 @@ const openMetadataEditor = (photo: Photo) => {
   originalMetadata.value = {
     title: initialTitle,
     description: initialDescription,
+    blur: photo.blur ?? null,
     tags: [...initialTags],
     location: initialLocation ? { ...initialLocation } : null,
     rating: typeof photo.exif?.Rating === 'number' ? photo.exif.Rating : null,
@@ -1875,7 +1933,11 @@ const enqueueEraseLocationTask = async (photo: Photo) => {
 }
 
 const saveMetadataChanges = async () => {
-  if (!editingPhoto.value || !isMetadataDirty.value) {
+  if (
+    !editingPhoto.value ||
+    !isMetadataDirty.value ||
+    blurMessageInvalid.value
+  ) {
     return
   }
 
@@ -1884,6 +1946,7 @@ const saveMetadataChanges = async () => {
     const payload: {
       title?: string
       description?: string
+      blur?: PhotoBlur | null
       tags?: string[]
       location?: { latitude: number; longitude: number } | null
       rating?: number | null
@@ -1896,6 +1959,8 @@ const saveMetadataChanges = async () => {
     if (descriptionChanged.value) {
       payload.description = normalizedDescription.value
     }
+
+    if (blurChanged.value) payload.blur = normalizedBlur.value
 
     if (tagsChanged.value) {
       payload.tags = [...editFormState.tags]
@@ -3312,6 +3377,37 @@ onUnmounted(() => {
                   </p>
                 </div>
 
+                <UFormField
+                  :label="$t('photoBlur.label')"
+                  :description="$t('photoBlur.description')"
+                  name="blurReason"
+                >
+                  <USelect
+                    v-model="editFormState.blurReason"
+                    :items="blurOptions"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="editFormState.blurReason === 'custom'"
+                  :label="$t('photoBlur.message')"
+                  :error="
+                    blurMessageInvalid
+                      ? $t('photoBlur.messageRequired')
+                      : undefined
+                  "
+                  name="blurMessage"
+                  required
+                >
+                  <UTextarea
+                    v-model="editFormState.blurMessage"
+                    :placeholder="$t('photoBlur.messagePlaceholder')"
+                    :maxlength="200"
+                    :rows="3"
+                    class="w-full"
+                  />
+                </UFormField>
+
                 <div class="flex items-center justify-between space-y-2">
                   <label
                     class="text-sm font-medium text-neutral-700 dark:text-neutral-200"
@@ -3413,7 +3509,9 @@ onUnmounted(() => {
                 type="submit"
                 form="edit-photo-form"
                 :loading="isSavingMetadata"
-                :disabled="!isMetadataDirty || isSavingMetadata"
+                :disabled="
+                  !isMetadataDirty || isSavingMetadata || blurMessageInvalid
+                "
                 icon="tabler:device-floppy"
               >
                 {{ $t('dashboard.photos.editModal.actions.save') }}

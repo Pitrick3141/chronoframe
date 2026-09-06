@@ -33,7 +33,7 @@
     "typecheck": "nuxt typecheck",
     "typecheck:server": "tsc --noEmit -p .nuxt/tsconfig.server.json",
     "test:uploads": "node --test tests/oversized-images.test.mjs tests/upload-metadata.test.mjs",
-    "test:photos": "node --test tests/photo-selection.test.mjs",
+    "test:photos": "node --test tests/photo-selection.test.mjs tests/photo-blur.test.mjs",
     "test:images": "node --test tests/image-delivery.test.mjs tests/image-loader.test.mjs tests/image-variants.test.mjs tests/gallery-loading.test.mjs tests/viewer-thumbnails.test.mjs tests/progressive-image.test.mjs tests/webgl-resolution.test.mjs",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

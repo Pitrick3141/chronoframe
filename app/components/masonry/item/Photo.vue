@@ -9,6 +9,8 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const { isPhotoBlurred, revealPhoto } = usePhotoBlur()
+const isBlurred = computed(() => isPhotoBlurred(props.photo))
 const emit = defineEmits<{
   'visibility-change': [
     { index: number; isVisible: boolean; date: string | Date },
@@ -88,6 +90,7 @@ const aspectRatio = computed(() => {
 
 // Show info overlay only when not playing video or video has finished
 const shouldShowInfoOverlay = computed(() => {
+  if (isBlurred.value) return false
   if (!props.photo.isLivePhoto) return true
 
   // On mobile, don't show overlay when touching or playing video
@@ -115,6 +118,7 @@ const handleImageError = () => {
 
 // LivePhoto video handling - 优化的交互逻辑
 const handleMouseEnter = async () => {
+  if (isBlurred.value) return
   // Skip mouse events on mobile devices
   if (isMobile.value) return
 
@@ -153,6 +157,7 @@ const handleMouseLeave = () => {
 }
 
 const playLivePhotoVideo = () => {
+  if (isBlurred.value) return
   if (!videoRef.value || !isVideoLoaded.value) return
 
   // 确保视频从头开始播放
@@ -228,6 +233,7 @@ const handleVideoEnded = () => {
 
 // Mobile touch handlers for LivePhoto
 const handleTouchStart = (event: TouchEvent) => {
+  if (isBlurred.value) return
   if (
     !isMobile.value ||
     !props.photo.isLivePhoto ||
@@ -330,6 +336,10 @@ const cancelLivePhotoTouch = () => {
 
 // Handle click events - prevent opening viewer when video is playing
 const handleClick = (event: Event) => {
+  if (isBlurred.value) {
+    revealPhoto(props.photo)
+    return
+  }
   // On mobile, if video is playing or user is touching, don't open the viewer
   if (isMobile.value && (isVideoPlaying.value || isTouching.value)) {
     event.preventDefault()
@@ -351,6 +361,7 @@ const handleClick = (event: Event) => {
 
 // 智能LivePhoto处理：基于可见性和用户行为
 const processLivePhotoWhenVisible = async (userInteraction = false) => {
+  if (isBlurred.value) return
   const requestedStreamUrl = props.photo.livePhotoVideoUrl
   if (
     !props.photo.isLivePhoto ||
@@ -449,6 +460,18 @@ watch(
     isImageLoaded.value = false
   },
 )
+
+watch(isBlurred, (blurred) => {
+  if (blurred) {
+    streamAttachmentId++
+    pendingStreamRequest = null
+    isVideoPlaying.value = false
+    isVideoLoaded.value = false
+    detachStreamVideo()
+  } else {
+    void nextTick(() => processLivePhotoWhenVisible())
+  }
+})
 
 watch(
   () => props.photo.livePhotoVideoUrl,
@@ -572,7 +595,8 @@ onUnmounted(() => {
       <!-- Container with fixed aspect ratio -->
       <div
         class="w-full relative"
-        :style="{ aspectRatio }"
+        :style="{ aspectRatio, filter: isBlurred ? 'blur(24px)' : undefined }"
+        :aria-hidden="isBlurred || undefined"
       >
         <ThumbImage
           :src="photo.thumbnailUrl || ''"
@@ -590,7 +614,7 @@ onUnmounted(() => {
 
         <!-- LivePhoto video with enhanced motion transition -->
         <motion.video
-          v-if="photo.isLivePhoto && photo.livePhotoVideoUrl"
+          v-if="!isBlurred && photo.isLivePhoto && photo.livePhotoVideoUrl"
           ref="videoRef"
           class="absolute inset-0 w-full h-full object-cover"
           :class="{ 'select-none pointer-events-none': isVideoPlaying }"
@@ -622,8 +646,13 @@ onUnmounted(() => {
       />
 
       <!-- Live Photo indicator -->
+      <PhotoBlurOverlay
+        v-if="isBlurred && photo.blur"
+        :blur="photo.blur"
+        @reveal="revealPhoto(photo)"
+      />
       <PhotoLivePhotoIndicator
-        v-if="photo.isLivePhoto"
+        v-if="!isBlurred && photo.isLivePhoto"
         class="absolute top-2 left-2"
         :photo="photo"
         :is-video-playing="isVideoPlaying"

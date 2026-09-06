@@ -9,6 +9,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const { isPhotoBlurred, blurLabel } = usePhotoBlur()
 const emit = defineEmits<{
   indexChange: [index: number]
 }>()
@@ -199,6 +200,11 @@ watch(isMobile, () =>
         v-for="photo in thumbnailList"
         :key="photo.id"
         type="button"
+        :aria-label="
+          isPhotoBlurred(photo) && photo.blur
+            ? blurLabel(photo.blur)
+            : photo.title || $t('ui.photo.altFallback')
+        "
         class="thumbnail-item relative flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all duration-200 contain-intrinsic-size"
         :class="{
           'thumbnail-active border-white shadow-lg scale-110': photo.isActive,
@@ -215,12 +221,14 @@ watch(isMobile, () =>
           v-if="photo.thumbnailHash"
           :thumbhash="photo.thumbnailHash"
           class="absolute inset-0 w-full h-full"
+          :style="{ filter: isPhotoBlurred(photo) ? 'blur(10px)' : undefined }"
         />
         <img
           v-if="photo.thumbnailUrl && shouldLoadThumbnail(photo.index)"
           :src="imageVariantUrl(photo.thumbnailUrl, 360)"
           :alt="photo.title || $t('ui.photo.altFallback')"
           class="absolute inset-0 w-full h-full object-cover"
+          :style="{ filter: isPhotoBlurred(photo) ? 'blur(10px)' : undefined }"
           loading="eager"
           decoding="async"
         />
@@ -233,6 +241,11 @@ watch(isMobile, () =>
             class="w-6 h-6 text-gray-400"
           />
         </div>
+        <Icon
+          v-if="isPhotoBlurred(photo)"
+          name="tabler:eye-off"
+          class="absolute inset-0 m-auto size-5 text-white"
+        />
       </button>
     </div>
   </motion.div>

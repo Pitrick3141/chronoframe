@@ -1,4 +1,18 @@
 {
+  "photoBlur": {
+    "label": "Blur filter",
+    "description": "Blur this photo in the gallery and viewer until a visitor chooses to reveal it.",
+    "off": "Off",
+    "custom": "Custom warning",
+    "reasons": {
+      "disturbing": "Disturbing content",
+      "spoiler": "Spoiler"
+    },
+    "message": "Blur information",
+    "messagePlaceholder": "Explain why this photo is blurred",
+    "messageRequired": "Enter a warning between 1 and 200 characters.",
+    "reveal": "Click to reveal"
+  },
   "plural": {
     "photo": "no photos | one photo | {count} photos"
   },

@@ -1,4 +1,18 @@
 {
+  "photoBlur": {
+    "label": "模糊濾鏡",
+    "description": "在圖庫和檢視器中模糊顯示此照片，訪客點擊後可查看原圖。",
+    "off": "關閉",
+    "custom": "自訂提示",
+    "reasons": {
+      "disturbing": "可能引起不適的內容",
+      "spoiler": "劇透"
+    },
+    "message": "模糊提示資訊",
+    "messagePlaceholder": "說明此照片被模糊處理的原因",
+    "messageRequired": "請輸入 1 至 200 個字元的提示資訊。",
+    "reveal": "點擊查看"
+  },
   "map": {
     "cluster": {
       "details": "點選圖片查看詳細資訊",

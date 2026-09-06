@@ -1,4 +1,18 @@
 {
+  "photoBlur": {
+    "label": "ぼかしフィルター",
+    "description": "閲覧者が表示を選ぶまで、ギャラリーとビューアーでこの写真をぼかします。",
+    "off": "オフ",
+    "custom": "カスタムの注意書き",
+    "reasons": {
+      "disturbing": "不快に感じる可能性のある内容",
+      "spoiler": "ネタバレ"
+    },
+    "message": "ぼかしの理由",
+    "messagePlaceholder": "この写真をぼかす理由を入力",
+    "messageRequired": "1〜200文字で注意書きを入力してください。",
+    "reveal": "クリックして表示"
+  },
   "plural": {
     "photo": "写真がありません | 写真 {count} 枚"
   },

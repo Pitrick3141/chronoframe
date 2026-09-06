@@ -22,6 +22,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const { isPhotoBlurred, revealPhoto } = usePhotoBlur()
 const emit = defineEmits<{
   close: []
   indexChange: [index: number]
@@ -105,6 +106,9 @@ watch(isStreamVideoReady, (ready) => {
 
 // Computed
 const currentPhoto = computed(() => props.photos[props.currentIndex])
+const isCurrentPhotoBlurred = computed(
+  () => !!currentPhoto.value && isPhotoBlurred(currentPhoto.value),
+)
 const isMobile = useMediaQuery('(max-width: 768px)')
 
 // LivePhoto processing state
@@ -274,7 +278,12 @@ const handleImageLoaded = () => {
 // LivePhoto processing and playback functions
 const processCurrentLivePhoto = async () => {
   const photo = currentPhoto.value
-  if (!photo || !photo.isLivePhoto || !photo.livePhotoVideoUrl) {
+  if (
+    !photo ||
+    isPhotoBlurred(photo) ||
+    !photo.isLivePhoto ||
+    !photo.livePhotoVideoUrl
+  ) {
     livePhotoAttachmentId++
     pendingLivePhotoRequest = null
     isLivePhotoVideoLoaded.value = false
@@ -320,6 +329,7 @@ const processCurrentLivePhoto = async () => {
 }
 
 const playLivePhotoVideo = () => {
+  if (isCurrentPhotoBlurred.value) return
   if (!livePhotoVideoRef.value || !isLivePhotoVideoLoaded.value) return
 
   livePhotoVideoRef.value.currentTime = 0
@@ -352,6 +362,7 @@ const stopLivePhotoVideo = () => {
 }
 
 const handleLivePhotoMouseEnter = () => {
+  if (isCurrentPhotoBlurred.value) return
   if (
     !isMobile.value &&
     currentPhoto.value?.isLivePhoto &&
@@ -371,6 +382,7 @@ const handleLivePhotoMouseLeave = () => {
 }
 
 const handleLivePhotoTouchStart = (event: TouchEvent) => {
+  if (isCurrentPhotoBlurred.value) return
   if (
     isMobile.value &&
     currentPhoto.value?.isLivePhoto &&
@@ -411,6 +423,15 @@ const handleLivePhotoTouchStart = (event: TouchEvent) => {
     }
   }
 }
+
+watch(isCurrentPhotoBlurred, (blurred) => {
+  if (blurred) {
+    isLivePhotoPlaying.value = false
+    isLivePhotoHovering.value = false
+    isLivePhotoTouching.value = false
+  }
+  if (props.isOpen) void nextTick(() => processCurrentLivePhoto())
+})
 
 const handleLivePhotoTouchEnd = () => {
   if (isMobile.value) {
@@ -763,8 +784,24 @@ const swiperModules = [Navigation, Keyboard, Virtual]
                     @touchcancel="handleLivePhotoTouchEnd"
                     @contextmenu.prevent=""
                   >
+                    <template v-if="isPhotoBlurred(photo) && photo.blur">
+                      <ThumbImage
+                        :src="photo.thumbnailUrl || ''"
+                        :thumbhash="photo.thumbnailHash || ''"
+                        alt=""
+                        aria-hidden="true"
+                        class="h-full w-full object-contain"
+                        :style="{ filter: 'blur(24px)' }"
+                        image-contain
+                      />
+                      <PhotoBlurOverlay
+                        :blur="photo.blur"
+                        @reveal="revealPhoto(photo)"
+                      />
+                    </template>
                     <!-- Main Image -->
                     <ProgressiveImage
+                      v-else
                       class="h-full w-full object-contain transition-opacity duration-400"
                       :class="{
                         'opacity-0':
@@ -810,6 +847,7 @@ const swiperModules = [Navigation, Keyboard, Virtual]
                     <!-- LivePhoto Video -->
                     <motion.video
                       v-if="
+                        !isPhotoBlurred(photo) &&
                         photo.isLivePhoto &&
                         index === currentIndex &&
                         photo.livePhotoVideoUrl
